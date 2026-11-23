@@ -17,6 +17,8 @@ export interface WarmProcessOptions {
   log?: (msg: string) => void;
   /** Max queued requests before refusing (backpressure). */
   maxQueue?: number;
+  /** Write `input` verbatim as one line (pixel classify --jsonl expects a bare spec per line). */
+  rawLine?: boolean;
 }
 
 interface Pending {
@@ -40,10 +42,10 @@ export class WarmProcess {
   private buf = "";
   private nextId = 1;
   private closed = false;
-  private opts: Required<Pick<WarmProcessOptions, "args" | "timeoutMs" | "maxQueue">> & WarmProcessOptions;
+  private opts: Required<Pick<WarmProcessOptions, "args" | "timeoutMs" | "maxQueue" | "rawLine">> & WarmProcessOptions;
 
   constructor(opts: WarmProcessOptions) {
-    this.opts = { args: [], timeoutMs: 5_000, maxQueue: 64, ...opts };
+    this.opts = { args: [], timeoutMs: 5_000, maxQueue: 64, rawLine: false, ...opts };
     warmInstances.add(this);
   }
 
@@ -83,7 +85,7 @@ export class WarmProcess {
     for (const p of this.queue) {
       if (p.sent) continue;
       p.sent = true;
-      this.child.stdin.write(JSON.stringify({ id: p.id, input: p.input }) + "\n");
+      this.child.stdin.write((this.opts.rawLine ? p.input : JSON.stringify({ id: p.id, input: p.input })) + "\n");
     }
   }
 
@@ -104,6 +106,7 @@ export class WarmProcess {
       this.queue.splice(idx, 1);
       clearTimeout(p.timer);
       if (msg?.error) p.reject(new Error(String(msg.error)));
+      else if (this.opts.rawLine) p.resolve(line);
       else p.resolve(typeof msg?.data === "string" ? msg.data : line);
     }
   }
