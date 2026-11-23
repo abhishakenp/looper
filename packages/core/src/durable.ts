@@ -2,6 +2,7 @@ import { defineDoc, defineDocFamily, defineTask, MemoryStorage } from "@earendil
 import type { FlowId, FlowMeta } from "@looper/sdk";
 import fs from "node:fs";
 import path from "node:path";
+import { stateRoot, atomicWriteJson } from "./state.js";
 
 // --- pi-durable document contracts (L4 control plane) ---
 
@@ -64,15 +65,21 @@ export class LooperDurableRuntime {
   private snapshot: Record<string, unknown> = {};
 
   constructor(dir: string) {
-    this.snapshotFile = path.join(dir, "durable-snapshot.json");
+    // Prefer the out-of-tree state root; fall back to the supplied dir only if
+    // an existing snapshot is there (migration), keeping the checkout clean.
+    const outOfTree = stateRoot(dir);
+    const legacy = path.join(dir, "durable-snapshot.json");
+    this.snapshotFile = fs.existsSync(legacy) && !fs.existsSync(path.join(outOfTree, "durable-snapshot.json"))
+      ? legacy
+      : path.join(outOfTree, "durable-snapshot.json");
     try { this.snapshot = JSON.parse(fs.readFileSync(this.snapshotFile, "utf8")); } catch {}
   }
 
+  get file() { return this.snapshotFile; }
   getSnapshot<T>(key: string): T | undefined { return this.snapshot[key] as T | undefined; }
   async setSnapshot<T>(key: string, value: T): Promise<void> {
     this.snapshot[key] = value;
-    await fs.promises.mkdir(path.dirname(this.snapshotFile), { recursive: true });
-    await fs.promises.writeFile(this.snapshotFile, JSON.stringify(this.snapshot, null, 2));
+    await atomicWriteJson(this.snapshotFile, this.snapshot);
   }
 
   /** Control-plane identity for observability/correlation. */
@@ -96,8 +103,7 @@ export class LooperDurableRuntime {
       }
     }
     this.snapshot["looper:last_reconcile"] = { ts: now, sessionId, crashedFlows };
-    await fs.promises.mkdir(path.dirname(this.snapshotFile), { recursive: true });
-    await fs.promises.writeFile(this.snapshotFile, JSON.stringify(this.snapshot, null, 2));
+    await atomicWriteJson(this.snapshotFile, this.snapshot);
     return { crashedFlows };
   }
 }

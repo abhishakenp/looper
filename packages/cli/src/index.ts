@@ -2,7 +2,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, LooperDurableRuntime, MemoStore, loadConfig as loadLooperConfig } from "@looper/core";
+import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, LooperDurableRuntime, MemoStore, stateRoot, loadConfig as loadLooperConfig } from "@looper/core";
 import type { BridgeInbound, Decision, HookFn, HookType } from "@looper/sdk";
 
 const args = process.argv.slice(2);
@@ -39,7 +39,7 @@ const logFile = path.join(runDir, `${sessionId}.log`);
 await fs.promises.mkdir(traceDir, { recursive: true });
 await fs.promises.mkdir(runDir, { recursive: true });
 const log = (...args: unknown[]) => {
-  try { fs.appendFileSync(logFile, args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ") + "\n"); } catch {}
+  try { fs.appendFileSync(logFile, args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ") + "\n", { mode: 0o600 }); } catch {}
 };
 
 // Layered, normalized config (7 tiers; project layers trust-gated)
@@ -49,8 +49,9 @@ log(`[looper] project config trusted: ${projectTrusted}`);
 log(`[looper] config`, config);
 
 const flows = new FlowStore();
-const durable = new DurableState(path.join(cwd, ".looper"));
-const runtime = new LooperDurableRuntime(path.join(cwd, ".looper"));
+const stateDir = stateRoot(cwd);
+const durable = new DurableState(stateDir);
+const runtime = new LooperDurableRuntime(stateDir);
 const hooks = new HookRegistry(flows, durable);
 hooks.setLogger(log);
 const reconciled = await runtime.reconcile(sessionId);
@@ -67,7 +68,7 @@ function redact(obj: any): any {
   return out;
 }
 function trace(obj: unknown) {
-  try { fs.appendFileSync(traceFile, JSON.stringify(redact(obj)) + "\n"); } catch {}
+  try { fs.appendFileSync(traceFile, JSON.stringify(redact(obj)) + "\n", { mode: 0o600 }); } catch {}
 }
 
 const harnessArgs = Object.freeze([...rest]);
