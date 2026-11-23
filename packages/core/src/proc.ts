@@ -25,17 +25,25 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
     "--mode", `local:${target}`,
     "-s", opts.bridgeScript,
     "--set", `looper_sock=${opts.socketPath}`,
-    "-q",
+    "-v",
   ];
   const mitm = spawn(mitmdump, mitmArgs, {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...opts.env },
   });
-  mitm.stdout?.on("data", (d) => process.stderr.write(`[mitm] ${d}`));
-  mitm.stderr?.on("data", (d) => process.stderr.write(`[mitm] ${d}`));
+  let ready = false;
+  const onData = (d: Buffer) => {
+    const s = d.toString();
+    process.stderr.write(`[mitm] ${s}`);
+    if (s.includes("Local redirector started") || s.includes("successfully initialized")) ready = true;
+  };
+  mitm.stdout?.on("data", onData);
+  mitm.stderr?.on("data", onData);
 
-  // give mitmproxy a moment to start
-  await new Promise((r) => setTimeout(r, 1500));
+  // wait for mitmproxy local capture to be ready (macOS NE needs time)
+  const deadline = Date.now() + 15000;
+  while (!ready && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
+  if (!ready) console.error("[looper] warning: mitmproxy local capture not confirmed ready, proceeding anyway");
 
   const bin = resolveHarnessBinary(opts.harness);
   const child = spawn(bin, opts.args, {
