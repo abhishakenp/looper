@@ -1,0 +1,11 @@
+{
+  "name": "@looper/cli",
+  "version": "0.0.1",
+  "type": "module",
+  "bin": { "looper": "./dist/index.js" },
+  "scripts": { "build": "tsc -p tsconfig.json" },
+  "dependencies": {
+    "@looper/core": "workspace:*",
+    "@looper/sdk": "workspace:*"
+  }
+}

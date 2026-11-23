@@ -1,0 +1,183 @@
+"""
+Looper bridge addon for mitmdump.
+Dumb pipe: mitmproxy hooks -> unix socket NDJSON -> decision -> apply.
+Fail-open on any error/timeout.
+"""
+import json, socket, os, time, base64, threading
+from mitmproxy import http, ctx
+
+SOCK = None
+SEQ = 0
+LOCK = threading.Lock()
+TIMEOUT = 2.0
+PENDING = {}
+
+def load(loader):
+    loader.add_option(name="looper_sock", typespec=str, default="", help="Looper unix socket path")
+
+def configure(updated):
+    global SOCK
+    path = ctx.options.looper_sock
+    if not path:
+        return
+    try:
+        if SOCK:
+            SOCK.close()
+    except Exception:
+        pass
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(path)
+        SOCK = s
+        send({"t":"hello","pid":os.getpid()})
+        ctx.log.info(f"[looper] connected {path}")
+    except Exception as e:
+        SOCK = None
+        ctx.log.warn(f"[looper] connect failed: {e}")
+
+def send(msg):
+    global SOCK
+    if not SOCK:
+        return False
+    try:
+        data = (json.dumps(msg) + "\n").encode()
+        with LOCK:
+            SOCK.sendall(data)
+        return True
+    except Exception as e:
+        ctx.log.warn(f"[looper] send failed: {e}")
+        try: SOCK.close()
+        except Exception: pass
+        SOCK = None
+        return False
+
+def recv_decision(flow_id):
+    global SOCK
+    if not SOCK:
+        return {"action":"pass"}
+    with LOCK:
+        if flow_id in PENDING:
+            return PENDING.pop(flow_id)
+    SOCK.settimeout(TIMEOUT)
+    buf = b""
+    try:
+        while True:
+            chunk = SOCK.recv(65536)
+            if not chunk:
+                raise ConnectionError("closed")
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                if not line.strip():
+                    continue
+                msg = json.loads(line.decode())
+                if msg.get("t") == "decision":
+                    did = msg.get("id")
+                    dec = msg.get("decision", {"action":"pass"})
+                    if did == flow_id:
+                        return dec
+                    with LOCK:
+                        PENDING[did] = dec
+    except Exception as e:
+        ctx.log.warn(f"[looper] recv failed: {e}")
+        return {"action":"pass"}
+
+def flow_id(flow):
+    fid = getattr(flow, "_looper_id", None)
+    if not fid:
+        fid = f"f_{int(time.time()*1000)}_{id(flow)}"
+        flow._looper_id = fid
+    return fid
+
+def req_to_dict(flow):
+    r = flow.request
+    body = ""
+    try:
+        body = r.get_text(strict=False) or ""
+    except Exception:
+        try: body = base64.b64encode(r.raw_content or b"").decode()
+        except Exception: body = ""
+    return {
+        "id": flow_id(flow),
+        "method": r.method,
+        "url": r.pretty_url,
+        "headers": dict(r.headers),
+        "body": body,
+    }
+
+def res_to_dict(flow):
+    r = flow.response
+    body = ""
+    try:
+        body = r.get_text(strict=False) or ""
+    except Exception:
+        try: body = base64.b64encode(r.raw_content or b"").decode()
+        except Exception: body = ""
+    return {
+        "status": r.status_code,
+        "headers": dict(r.headers),
+        "body": body,
+    }
+
+def apply_request(flow, decision):
+    a = decision.get("action")
+    if a == "pass":
+        return
+    if a == "drop":
+        flow.kill()
+        return
+    if a == "respond":
+        res = decision.get("response", {})
+        flow.response = http.Response.make(
+            res.get("status", 200),
+            res.get("body", ""),
+            res.get("headers", {}),
+        )
+        return
+    if a == "mutate":
+        req = decision.get("request", {})
+        if "method" in req: flow.request.method = req["method"]
+        if "url" in req: flow.request.url = req["url"]
+        if "headers" in req:
+            for k,v in req["headers"].items(): flow.request.headers[k] = v
+        if "body" in req: flow.request.text = req["body"]
+
+def request(flow):
+    fid = flow_id(flow)
+    msg = {"t":"request","id":fid,"req":req_to_dict(flow)}
+    if send(msg):
+        apply_request(flow, recv_decision(fid))
+
+def responseheaders(flow):
+    fid = flow_id(flow)
+    msg = {"t":"responseheaders","id":fid,"res":{"id":fid,"status":flow.response.status_code,"headers":dict(flow.response.headers)}}
+    if send(msg):
+        d = recv_decision(fid)
+        a = d.get("action")
+        if a == "stream":
+            flow.response.stream = True
+        elif a == "buffer":
+            flow.response.stream = False
+        elif a == "drop":
+            flow.kill()
+
+def response(flow):
+    fid = flow_id(flow)
+    # if streamed, we may have sent chunks; still send final
+    msg = {"t":"response","id":fid,"res":res_to_dict(flow)}
+    if send(msg):
+        d = recv_decision(fid)
+        a = d.get("action")
+        if a == "mutate":
+            res = d.get("response", {})
+            if "status" in res: flow.response.status_code = res["status"]
+            if "headers" in res:
+                for k,v in res["headers"].items(): flow.response.headers[k] = v
+            if "body" in res: flow.response.text = res["body"]
+        elif a == "drop":
+            flow.kill()
+    send({"t":"done","id":fid})
+
+def error(flow):
+    fid = flow_id(flow)
+    send({"t":"error","id":fid,"error":str(flow.error)})
