@@ -84,6 +84,7 @@ export function normalizeConfig(input: Record<string, any>): LooperConfig {
       : {},
     readyTimeoutMs: num(m.readyTimeoutMs, d.readyTimeoutMs, 0, 600_000),
     caTimeoutMs: num(m.caTimeoutMs, d.caTimeoutMs, 0, 60_000),
+    proxyPort: num(m.proxyPort, d.proxyPort, 1, 65_535),
     caCert: m.caCert === false ? false : str(m.caCert, ""),
     fanout: {
       enabled: bool(m.fanout?.enabled, false),
@@ -139,6 +140,7 @@ function envOverrides(env: Record<string, string | undefined>): Record<string, u
     ["LOOPER_TRACE_DIR", (v) => { out.traceDir = v; }],
     ["LOOPER_READY_TIMEOUT_MS", (v) => { out.readyTimeoutMs = Number(v); }],
     ["LOOPER_CA_TIMEOUT_MS", (v) => { out.caTimeoutMs = Number(v); }],
+    ["LOOPER_PROXY_PORT", (v) => { out.proxyPort = Number(v); }],
     ["LOOPER_CAPTURE_BODIES", (v) => { out.captureBodies = v === "1" || v === "true"; }],
     ["LOOPER_TRUST_PROJECT_CONFIG", (v) => { out.security = { trustProjectConfig: v === "1" || v === "true" }; }],
     ["LOOPER_FANOUT_CONCURRENCY", (v) => { out.fanout = { concurrency: Number(v) }; }],

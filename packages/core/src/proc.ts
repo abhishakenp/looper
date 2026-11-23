@@ -21,6 +21,12 @@ export interface ProcOptions {
   caTimeoutMs?: number;
   /** Delay before SIGKILL after a graceful signal. Default 2000. */
   killGraceMs?: number;
+  /** "local" (redirector) or "regular" (explicit HTTP proxy). Default local. */
+  interceptMode?: "local" | "regular";
+  /** Listen port for regular mode. Default 8080. */
+  proxyPort?: number;
+  /** Whether mitmdump captures request/response bodies. Default false. */
+  captureBodies?: boolean;
 }
 
 export interface ProcHandle {
@@ -77,29 +83,41 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
   const mitmdump = opts.mitmdump || "mitmdump";
   const target = opts.intercept || opts.harness;
   const log = opts.log || (() => {});
-  const readyTimeoutMs = opts.readyTimeoutMs ?? 15_000;
+  const readyTimeoutMs = opts.readyTimeoutMs ?? 30_000;
   const caTimeoutMs = opts.caTimeoutMs ?? 3_000;
   const killGraceMs = opts.killGraceMs ?? 2_000;
+  const mode = opts.interceptMode ?? "local";
+  const proxyPort = opts.proxyPort ?? 8080;
   const detached = process.platform !== "win32";
 
-  const mitmArgs = [
-    "--mode", `local:${target}`,
+  const mitmArgs = mode === "regular"
+    ? ["--mode", "regular", "--listen-port", String(proxyPort)]
+    : ["--mode", `local:${target}`];
+  mitmArgs.push(
     "-s", opts.bridgeScript,
     "--set", `looper_sock=${opts.socketPath}`,
     "-v",
-  ];
+  );
   const mitm = spawn(mitmdump, mitmArgs, {
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...opts.env },
+    env: { ...process.env, ...opts.env, LOOPER_CAPTURE_BODIES: opts.captureBodies ? "1" : "0" } as Record<string, string>,
     detached,
   });
   const pgids: number[] = [];
   if (mitm.pid) { pgids.push(mitm.pid); liveGroups.add(mitm.pid); }
   let ready = false;
+  let readyTail = "";
   const onData = (d: Buffer) => {
     const s = d.toString();
     log(`[mitm] ${s}`);
-    if (s.includes("Local redirector started") || s.includes("successfully initialized")) ready = true;
+    // A readiness phrase can be split across socket chunks — accumulate.
+    readyTail = (readyTail + s).slice(-4096);
+    if (
+      readyTail.includes("Local redirector started") ||
+      readyTail.includes("successfully initialized") ||
+      /\[looper\] connected /.test(readyTail) ||
+      (mode === "regular" && /Proxy server listening|Listening at http/i.test(readyTail))
+    ) ready = true;
   };
   mitm.stdout?.on("data", onData);
   mitm.stderr?.on("data", onData);
@@ -119,6 +137,14 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
     }
   }
   const baseEnv = { ...process.env, ...opts.env } as Record<string, string | undefined>;
+  if (mode === "regular") {
+    const proxy = `http://127.0.0.1:${proxyPort}`;
+    baseEnv.HTTP_PROXY = proxy;
+    baseEnv.HTTPS_PROXY = proxy;
+    baseEnv.ALL_PROXY = proxy;
+    baseEnv.http_proxy = proxy;
+    baseEnv.https_proxy = proxy;
+  }
   const caEnv = buildCaEnv(caCert, baseEnv);
   if (caCert) log(`[looper] ca ${caCert}`);
   else if (opts.caCert !== false) log("[looper] warning: mitmproxy CA cert not found; TLS clients may fail");

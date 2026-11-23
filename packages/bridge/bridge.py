@@ -14,6 +14,23 @@ PENDING = {}
 
 def load(loader):
     loader.add_option(name="looper_sock", typespec=str, default="", help="Looper unix socket path")
+    # Body capture is read from LOOPER_CAPTURE_BODIES (env) — a second add_option
+    # changes configure() timing and can leave looper_sock unset when it fires.
+
+def connect():
+    global SOCK
+    path = ctx.options.looper_sock
+    if not path or SOCK:
+        return
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(path)
+        SOCK = s
+        send({"t":"hello","pid":os.getpid()})
+        ctx.log.info(f"[looper] connected {path}")
+    except Exception as e:
+        SOCK = None
+        ctx.log.warn(f"[looper] connect failed: {e}")
 
 def configure(updated):
     global SOCK
@@ -35,8 +52,13 @@ def configure(updated):
         SOCK = None
         ctx.log.warn(f"[looper] connect failed: {e}")
 
+def running():
+    connect()
+
 def send(msg):
     global SOCK
+    if not SOCK:
+        connect()
     if not SOCK:
         return False
     try:
@@ -111,14 +133,21 @@ def flow_id(flow):
         flow._looper_id = fid
     return fid
 
+def capture_bodies():
+    # Env is authoritative: a second --set option changes configure() timing
+    # and can leave looper_sock unset in the addon.
+    env = os.environ.get("LOOPER_CAPTURE_BODIES")
+    return env == "1"
+
 def req_to_dict(flow):
     r = flow.request
     body = ""
-    try:
-        body = r.get_text(strict=False) or ""
-    except Exception:
-        try: body = base64.b64encode(r.raw_content or b"").decode()
-        except Exception: body = ""
+    if capture_bodies():
+        try:
+            body = r.get_text(strict=False) or ""
+        except Exception:
+            try: body = base64.b64encode(r.raw_content or b"").decode()
+            except Exception: body = ""
     return {
         "id": flow_id(flow),
         "method": r.method,
@@ -130,11 +159,12 @@ def req_to_dict(flow):
 def res_to_dict(flow):
     r = flow.response
     body = ""
-    try:
-        body = r.get_text(strict=False) or ""
-    except Exception:
-        try: body = base64.b64encode(r.raw_content or b"").decode()
-        except Exception: body = ""
+    if capture_bodies():
+        try:
+            body = r.get_text(strict=False) or ""
+        except Exception:
+            try: body = base64.b64encode(r.raw_content or b"").decode()
+            except Exception: body = ""
     return {
         "status": r.status_code,
         "headers": dict(r.headers),
@@ -165,6 +195,7 @@ def apply_request(flow, decision):
         if "body" in req: flow.request.text = req["body"]
 
 def request(flow):
+    connect()
     fid = flow_id(flow)
     msg = {"t":"request","id":fid,"req":req_to_dict(flow)}
     if send(msg):
@@ -196,6 +227,7 @@ def make_stream(fid):
     return stream
 
 def responseheaders(flow):
+    connect()
     fid = flow_id(flow)
     msg = {"t":"responseheaders","id":fid,"res":{"id":fid,"status":flow.response.status_code,"headers":dict(flow.response.headers)}}
     if send(msg):
@@ -209,6 +241,7 @@ def responseheaders(flow):
             flow.kill()
 
 def response(flow):
+    connect()
     fid = flow_id(flow)
     # if streamed, we may have sent chunks; still send final
     msg = {"t":"response","id":fid,"res":res_to_dict(flow)}
@@ -226,5 +259,6 @@ def response(flow):
     send({"t":"done","id":fid})
 
 def error(flow):
+    connect()
     fid = flow_id(flow)
     send({"t":"error","id":fid,"error":str(flow.error)})

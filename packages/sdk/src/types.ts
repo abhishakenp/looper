@@ -75,6 +75,10 @@ export interface LooperConfig {
   readyTimeoutMs?: number;
   /** Wall-clock budget (ms) for locating the mitmproxy CA certificate. */
   caTimeoutMs?: number;
+  /** mitmproxy listen port when interceptMode is "regular". Default 8080. */
+  proxyPort?: number;
+  /** Extension context: per-extension config from `config.extensionsConfig[name]`. */
+  config?: Record<string, unknown>;
   /** Namespaced workflow config. Each extension owns its subobject. */
   fanout?: {
     enabled?: boolean;
@@ -112,8 +116,9 @@ export const DEFAULT_LOOPER_CONFIG: Required<Pick<LooperConfig,
   logLevel: "info",
   interceptMode: "local",
   harnessEnv: {},
-  readyTimeoutMs: 15_000,
+  readyTimeoutMs: 30_000,
   caTimeoutMs: 3_000,
+  proxyPort: 8080,
   fanout: {
     enabled: false,
     concurrency: 8,
@@ -205,6 +210,8 @@ export interface ExtensionContext {
   hold: (flowId: FlowId, timeoutMs?: number) => HoldHandle;
   /** Register a disposer that runs when THIS extension is reloaded or removed. */
   effect: (disposer: () => void) => void;
+  /** This extension's namespaced config (`config.extensionsConfig[fileStem]`). */
+  config: Record<string, unknown>;
 }
 
 export interface FlowStoreLike {

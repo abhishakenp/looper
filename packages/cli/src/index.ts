@@ -2,7 +2,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, LooperDurableRuntime, MemoStore, stateRoot, loadConfig as loadLooperConfig } from "@looper/core";
+import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, LooperDurableRuntime, MemoStore, stateRoot, expandTilde, loadConfig as loadLooperConfig } from "@looper/core";
 import type { BridgeInbound, Decision, HookFn, HookType } from "@looper/sdk";
 
 const args = process.argv.slice(2);
@@ -30,23 +30,31 @@ const rest = args.slice(1);
 const cwd = process.cwd();
 const sessionId = `s_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
 const runDir = path.join(os.homedir(), ".looper", "run");
-const socketPath = path.join(runDir, `${sessionId}.sock`);
+
+// Layered, normalized config (7 tiers; project layers trust-gated) — before paths.
+const { config, layers, projectTrusted } = loadLooperConfig(cwd);
+const socketPath = config.bridgeSocket ? expandTilde(config.bridgeSocket) : path.join(runDir, `${sessionId}.sock`);
 const bridgeScript = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../bridge/bridge.py");
-const traceDir = path.join(os.homedir(), ".looper", "traces");
+const traceDir = expandTilde(config.traceDir || "~/.looper/traces");
 const traceFile = path.join(traceDir, `${sessionId}.ndjson`);
 const logFile = path.join(runDir, `${sessionId}.log`);
 
 await fs.promises.mkdir(traceDir, { recursive: true });
 await fs.promises.mkdir(runDir, { recursive: true });
-const log = (...args: unknown[]) => {
+
+const LEVELS: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3, none: 99 };
+const minLevel = LEVELS[config.logLevel || "info"] ?? 1;
+const logAt = (level: string, ...args: unknown[]) => {
+  if ((LEVELS[level] ?? 1) < minLevel) return;
   try { fs.appendFileSync(logFile, args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ") + "\n", { mode: 0o600 }); } catch {}
 };
-
-// Layered, normalized config (7 tiers; project layers trust-gated)
-const { config, layers, projectTrusted } = loadLooperConfig(cwd);
-log(`[looper] config layers: ${layers.map(l => l.name).join(" | ")}`);
-log(`[looper] project config trusted: ${projectTrusted}`);
-log(`[looper] config`, config);
+const log = (...args: unknown[]) => logAt("info", ...args);
+const logDebug = (...args: unknown[]) => logAt("debug", ...args);
+const logWarn = (...args: unknown[]) => logAt("warn", ...args);
+const logError = (...args: unknown[]) => logAt("error", ...args);
+logDebug(`[looper] config layers: ${layers.map(l => l.name).join(" | ")}`);
+logDebug(`[looper] project config trusted: ${projectTrusted}`);
+logDebug(`[looper] config`, config);
 
 const flows = new FlowStore();
 const stateDir = stateRoot(cwd);
@@ -57,15 +65,24 @@ hooks.setLogger(log);
 const reconciled = await runtime.reconcile(sessionId);
 if (reconciled.crashedFlows.length) log(`[looper] reconciled ${reconciled.crashedFlows.length} crashed flow(s)`);
 
+const redactKey = new RegExp((config.trace?.redactKeys || []).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") || "(?!x)x", "i");
+const bodyCap = config.trace?.bodyCapChars ?? 0;
+function capStrings(v: any): any {
+  if (typeof v === "string") return bodyCap > 0 && v.length > bodyCap ? v.slice(0, bodyCap) + `...[CAP ${v.length - bodyCap}]` : v;
+  if (Array.isArray(v)) return v.map(capStrings);
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, capStrings(x)]));
+  return v;
+}
 function redact(obj: any): any {
+  if (config.trace?.mode === "raw") return capStrings(obj);
   if (!obj || typeof obj !== "object") return obj;
   if (Array.isArray(obj)) return obj.map(redact);
   const out: any = {};
   for (const [k, v] of Object.entries(obj)) {
-    if (/authorization|cookie|token|api[-_]?key|secret|password/i.test(k)) out[k] = "[REDACTED]";
+    if (redactKey.test(k)) out[k] = "[REDACTED]";
     else out[k] = redact(v);
   }
-  return out;
+  return capStrings(out);
 }
 function trace(obj: unknown) {
   try { fs.appendFileSync(traceFile, JSON.stringify(redact(obj)) + "\n", { mode: 0o600 }); } catch {}
@@ -96,7 +113,10 @@ const procCtx = {
     readyTimeoutMs: config.readyTimeoutMs,
     caTimeoutMs: config.caTimeoutMs,
     killGraceMs: config.fanout?.killGraceMs,
-    log,
+    interceptMode: config.interceptMode,
+    proxyPort: config.proxyPort,
+    captureBodies: config.captureBodies,
+    log: logDebug,
     ...overrides,
     env: { ...process.env, ...config.harnessEnv, ...(overrides.env || {}) },
   }),
@@ -140,9 +160,19 @@ const extensionFiles = (): string[] => {
   for (const dir of extDirs) {
     if (!fs.existsSync(dir)) continue;
     for (const f of fs.readdirSync(dir).filter(x => x.endsWith(".ts") || x.endsWith(".js") || x.endsWith(".mjs"))) {
+      const stem = path.basename(f).replace(/\.(ts|js|mjs)$/, "");
+      // `extensions` list, when non-empty, is an explicit allow-list + order.
+      const configured = config.extensions || [];
+      if (configured.length && !configured.includes(stem)) continue;
       out.push(path.join(dir, f));
     }
   }
+  const order = config.extensions || [];
+  if (order.length) out.sort((a, b) => {
+    const sa = path.basename(a).replace(/\.(ts|js|mjs)$/, "");
+    const sb = path.basename(b).replace(/\.(ts|js|mjs)$/, "");
+    return order.indexOf(sa) - order.indexOf(sb);
+  });
   return out;
 };
 
@@ -162,6 +192,7 @@ function makeCtx(file: string, disposers: Array<() => void>) {
     requestId: (flowId?: string) => `req_${flowId || sessionId}`,
     hold: (flowId: string, timeoutMs?: number) => hooks.holdFlow(flowId, timeoutMs),
     effect: (disposer: () => void) => { disposers.push(disposer); },
+    config: (config.extensionsConfig || {})[name.replace(/\.(ts|js|mjs)$/, "")] || {},
   };
 }
 
@@ -188,7 +219,7 @@ async function loadFile(file: string, force = false) {
     if (typeof ext === "function") await ext(ctx);
     else if (ext && typeof ext.setup === "function") await ext.setup(ctx);
     extRegistry.set(file, { disposers, mtimeMs: st.mtimeMs });
-    log(`[looper] loaded extension ${path.basename(file)}`);
+    logDebug(`[looper] loaded extension ${path.basename(file)}`);
   } catch (e) {
     for (const d of [...disposers].reverse()) { try { d(); } catch {} }
     log(`[looper] extension load failed ${path.basename(file)}:`, e);
@@ -205,7 +236,7 @@ async function reloadExtensions(force = false) {
     const files = extensionFiles();
     for (const file of [...extRegistry.keys()]) if (!files.includes(file)) await unloadFile(file);
     for (const file of files) await loadFile(file, force);
-    log(`[looper] extensions reloaded (${extRegistry.size} active)`);
+    logDebug(`[looper] extensions reloaded (${extRegistry.size} active)`);
   } finally {
     reloading = false;
   }
@@ -258,7 +289,10 @@ const handle = await spawnProxied({
   readyTimeoutMs: config.readyTimeoutMs,
   caTimeoutMs: config.caTimeoutMs,
   killGraceMs: config.fanout?.killGraceMs,
-  log,
+  interceptMode: config.interceptMode,
+  proxyPort: config.proxyPort,
+  captureBodies: config.captureBodies,
+  log: logDebug,
 });
 
 const cleanup = async () => {
