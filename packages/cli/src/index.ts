@@ -2,8 +2,8 @@
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, LooperDurableRuntime } from "@looper/core";
-import type { BridgeInbound, Decision, HookFn, HookType, LooperConfig } from "@looper/sdk";
+import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, LooperDurableRuntime, MemoStore, loadConfig as loadLooperConfig } from "@looper/core";
+import type { BridgeInbound, Decision, HookFn, HookType } from "@looper/sdk";
 
 const args = process.argv.slice(2);
 if (args.length === 0) {
@@ -42,20 +42,10 @@ const log = (...args: unknown[]) => {
   try { fs.appendFileSync(logFile, args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ") + "\n"); } catch {}
 };
 
-// Load config from global and project
-function loadConfig(): LooperConfig {
-  const globalPath = path.join(os.homedir(), ".looper", "config.json");
-  const projectPath = path.join(cwd, ".looper", "config.json");
-  let config: LooperConfig = {};
-  for (const p of [globalPath, projectPath]) {
-    try {
-      const c = JSON.parse(fs.readFileSync(p, "utf8"));
-      config = { ...config, ...c };
-    } catch {}
-  }
-  return config;
-}
-const config = loadConfig();
+// Layered, normalized config (7 tiers; project layers trust-gated)
+const { config, layers, projectTrusted } = loadLooperConfig(cwd);
+log(`[looper] config layers: ${layers.map(l => l.name).join(" | ")}`);
+log(`[looper] project config trusted: ${projectTrusted}`);
 log(`[looper] config`, config);
 
 const flows = new FlowStore();
@@ -102,6 +92,9 @@ const procCtx = {
     intercept: harnessIntercept,
     caCert: config.caCert,
     mitmdump: config.mitmdump,
+    readyTimeoutMs: config.readyTimeoutMs,
+    caTimeoutMs: config.caTimeoutMs,
+    killGraceMs: config.fanout?.killGraceMs,
     log,
     ...overrides,
     env: { ...process.env, ...config.harnessEnv, ...(overrides.env || {}) },
@@ -109,43 +102,7 @@ const procCtx = {
   spawnProxied,
 };
 
-// Load extensions from global and project dirs
-const extDirs = [
-  path.join(os.homedir(), ".looper", "extensions"),
-  path.join(cwd, ".looper", "extensions"),
-];
-async function loadExtensions() {
-  hooks.clear();
-  for (const dir of extDirs) {
-    if (!fs.existsSync(dir)) continue;
-    for (const f of fs.readdirSync(dir).filter(x => x.endsWith(".ts") || x.endsWith(".js") || x.endsWith(".mjs"))) {
-      try {
-        const mod = await import(path.join(dir, f) + `?t=${Date.now()}`);
-        const ext = mod.default || mod.extension || mod;
-        const ctx = { on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log, state: durable, proc: procCtx };
-        if (typeof ext === "function") {
-          await ext(ctx);
-        } else if (ext && typeof ext.setup === "function") {
-          await ext.setup(ctx);
-        }
-        log(`[looper] loaded extension ${f}`);
-      } catch (e) {
-        log(`[looper] extension load failed ${f}:`, e);
-      }
-    }
-  }
-}
-await loadExtensions();
-
-// hot reload
-for (const dir of extDirs) {
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    let t: any = null;
-    fs.watch(dir, () => { clearTimeout(t); t = setTimeout(() => { log("[looper] reloading extensions"); loadExtensions().catch(log); }, 200); });
-  } catch {}
-}
-
+// Bridge server first — extensions need it to drain in-flight claims on reload.
 const server = new BridgeServer(socketPath, async (msg: BridgeInbound) => {
   const id = (msg as any).id as string | undefined;
   if (id) runtime.setSnapshot(`flow:${id}:last`, { t: msg.t, status: msg.t, ts: Date.now(), requestId: `req_${id}` }).catch(() => {});
@@ -163,6 +120,131 @@ log(`[looper] bridge ${socketPath}`);
 log(`[looper] trace ${traceFile}`);
 log(`[looper] log ${logFile}`);
 
+// Bounded, failure-safe memo shared across flows (router verdicts, classifications).
+const memo = new MemoStore(config.router?.memoCap ?? 32);
+
+// Per-extension lifecycle: only the changed file is unloaded/reloaded.
+const extDirs = [
+  path.join(os.homedir(), ".looper", "extensions"),
+  path.join(cwd, ".looper", "extensions"),
+];
+interface ExtEntry { disposers: Array<() => void>; mtimeMs: number }
+const extRegistry = new Map<string, ExtEntry>();
+const watchDisposers: Array<() => void> = [];
+let reloading = false;
+let reloadTimer: any = null;
+
+const extensionFiles = (): string[] => {
+  const out: string[] = [];
+  for (const dir of extDirs) {
+    if (!fs.existsSync(dir)) continue;
+    for (const f of fs.readdirSync(dir).filter(x => x.endsWith(".ts") || x.endsWith(".js") || x.endsWith(".mjs"))) {
+      out.push(path.join(dir, f));
+    }
+  }
+  return out;
+};
+
+function makeCtx(file: string, disposers: Array<() => void>) {
+  const name = path.basename(file);
+  return {
+    on: (t: HookType, fn: HookFn, n?: string) => {
+      const d = hooks.on(t, fn, n || name);
+      disposers.push(d);
+      return d;
+    },
+    flows,
+    log,
+    state: durable,
+    proc: procCtx,
+    memo: <T>(k: string, fn: () => Promise<T> | T) => memo.get<T>(`ext:${name}:${k}`, fn),
+    requestId: (flowId?: string) => `req_${flowId || sessionId}`,
+    hold: (flowId: string, timeoutMs?: number) => hooks.holdFlow(flowId, timeoutMs),
+    effect: (disposer: () => void) => { disposers.push(disposer); },
+  };
+}
+
+async function unloadFile(file: string) {
+  const rec = extRegistry.get(file);
+  if (!rec) return;
+  for (const d of [...rec.disposers].reverse()) {
+    try { d(); } catch (e) { log(`[looper] disposer failed for ${path.basename(file)}:`, e); }
+  }
+  extRegistry.delete(file);
+}
+
+async function loadFile(file: string, force = false) {
+  let st: fs.Stats;
+  try { st = fs.statSync(file); } catch { return; }
+  const prev = extRegistry.get(file);
+  if (!force && prev && prev.mtimeMs === st.mtimeMs) return;
+  if (prev) await unloadFile(file);
+  const disposers: Array<() => void> = [];
+  try {
+    const mod = await import(new URL(`file://${file}?t=${Date.now()}`).href);
+    const ext = mod.default || mod.extension || mod;
+    const ctx = makeCtx(file, disposers);
+    if (typeof ext === "function") await ext(ctx);
+    else if (ext && typeof ext.setup === "function") await ext.setup(ctx);
+    extRegistry.set(file, { disposers, mtimeMs: st.mtimeMs });
+    log(`[looper] loaded extension ${path.basename(file)}`);
+  } catch (e) {
+    for (const d of [...disposers].reverse()) { try { d(); } catch {} }
+    log(`[looper] extension load failed ${path.basename(file)}:`, e);
+  }
+}
+
+async function reloadExtensions(force = false) {
+  if (reloading) return;
+  reloading = true;
+  try {
+    const grace = config.reload?.disposeGraceMs ?? 5_000;
+    const drained = await server.waitForClaims(grace);
+    if (!drained) log(`[looper] reload: fail-open ${server.failOpenClaims().length} outstanding claim(s) after ${grace}ms`);
+    const files = extensionFiles();
+    for (const file of [...extRegistry.keys()]) if (!files.includes(file)) await unloadFile(file);
+    for (const file of files) await loadFile(file, force);
+    log(`[looper] extensions reloaded (${extRegistry.size} active)`);
+  } finally {
+    reloading = false;
+  }
+}
+await reloadExtensions(true);
+
+// Hot reload: watch each dir AND its parent (fs.watch dies on atomic save),
+// plus a slow mtime poll so changes made via rename/replace are never missed.
+for (const dir of extDirs) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const schedule = () => {
+      clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => { reloadExtensions().catch(log); }, config.reload?.debounceMs ?? 200);
+    };
+    for (const target of [dir, path.dirname(dir)]) {
+      try { const w = fs.watch(target, schedule); watchDisposers.push(() => w.close()); } catch {}
+    }
+  } catch {}
+}
+const poll = setInterval(() => {
+  try {
+    const files = extensionFiles();
+    let changed = files.length !== extRegistry.size;
+    if (!changed) {
+      for (const f of files) {
+        const rec = extRegistry.get(f);
+        if (!rec) { changed = true; break; }
+        try { if (fs.statSync(f).mtimeMs !== rec.mtimeMs) { changed = true; break; } } catch { changed = true; break; }
+      }
+    }
+    if (changed) {
+      clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => { reloadExtensions().catch(log); }, config.reload?.debounceMs ?? 200);
+    }
+  } catch {}
+}, config.reload?.pollMs ?? 2_000);
+poll.unref?.();
+watchDisposers.push(() => clearInterval(poll));
+
 const handle = await spawnProxied({
   harness,
   args: rest,
@@ -172,11 +254,18 @@ const handle = await spawnProxied({
   intercept: path.basename(resolveHarnessBinary(harness)),
   caCert: config.caCert,
   mitmdump: config.mitmdump,
+  readyTimeoutMs: config.readyTimeoutMs,
+  caTimeoutMs: config.caTimeoutMs,
+  killGraceMs: config.fanout?.killGraceMs,
   log,
 });
 
 const cleanup = async () => {
-  try { handle.kill("SIGTERM"); } catch {}
+  try { handle.kill("SIGTERM", config.fanout?.killGraceMs ?? 2_000); } catch {}
+  clearTimeout(reloadTimer);
+  for (const d of watchDisposers) { try { d(); } catch {} }
+  for (const file of [...extRegistry.keys()]) await unloadFile(file);
+  try { server.failOpenClaims(); } catch {}
   try { await server.stop(); } catch {}
 };
 process.on("SIGINT", () => { cleanup().finally(() => process.exit(130)); });

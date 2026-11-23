@@ -5,4 +5,6 @@ export * from "./proc.js";
 export * from "./util.js";
 export * from "./state.js";
 export * from "./durable.js";
+export * from "./config.js";
+export * from "./memo.js";
 export * from "./workflows/detect.js";

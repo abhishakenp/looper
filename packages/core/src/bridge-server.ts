@@ -45,6 +45,23 @@ export class BridgeServer {
       }
     });
   }
+  /** Number of flows currently held on an async claim. */
+  get pendingClaimCount() { return this.pendingClaims.size; }
+  get pendingClaimIds(): FlowId[] { return [...this.pendingClaims.keys()]; }
+  /** Bounded wait for outstanding claims to settle before unloading an extension. */
+  async waitForClaims(timeoutMs: number): Promise<boolean> {
+    const deadline = timeoutMs > 0 ? Date.now() + timeoutMs : Infinity;
+    while (this.pendingClaims.size > 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return this.pendingClaims.size === 0;
+  }
+  /** Fail-open every outstanding claim (used on shutdown / reload timeout). */
+  failOpenClaims(): FlowId[] {
+    const ids = [...this.pendingClaims.keys()];
+    for (const id of ids) this.sendDecision(id, { action: "pass" });
+    return ids;
+  }
   sendDecision(id: FlowId, decision: Decision) {
     const conn = this.pendingClaims.get(id);
     if (!conn) return false;

@@ -15,12 +15,21 @@ export interface ProcOptions {
   intercept?: string; // process name or pid spec for mitmproxy local mode
   caCert?: string | false; // path to CA cert, or false to disable injection
   log?: (msg: string) => void;
+  /** mitmproxy readiness budget; 0 waits indefinitely. Default 15000. */
+  readyTimeoutMs?: number;
+  /** CA file polling budget. Default 3000. */
+  caTimeoutMs?: number;
+  /** Delay before SIGKILL after a graceful signal. Default 2000. */
+  killGraceMs?: number;
 }
 
 export interface ProcHandle {
   mitm?: ChildProcess;
   child: ChildProcess;
-  kill: (signal?: NodeJS.Signals) => void;
+  kill: (signal?: NodeJS.Signals, graceMs?: number) => void;
+  /** Process group ids, for observability. */
+  pgids: number[];
+  settled: boolean;
 }
 
 const DEFAULT_CA_PATHS = [
@@ -48,20 +57,44 @@ export function buildCaEnv(caCert: string | undefined, base: Record<string, stri
   return env;
 }
 
+// All spawned groups are tracked so a looper exit cannot orphan a harness or mitmproxy.
+// pi-ultimate learned this the hard way: a grandchild holding stdio kept a worker forever.
+const liveGroups = new Set<number>();
+
+function signalGroup(pid: number, signal: NodeJS.Signals) {
+  if (process.platform !== "win32") {
+    try { process.kill(-pid, signal); return; } catch { /* may already be gone */ }
+  }
+  try { process.kill(pid, signal); } catch {}
+}
+
+process.on("exit", () => {
+  // Best-effort synchronous kill; no grace here — the process is already leaving.
+  for (const pid of [...liveGroups]) signalGroup(pid, "SIGKILL");
+});
+
 export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
   const mitmdump = opts.mitmdump || "mitmdump";
   const target = opts.intercept || opts.harness;
+  const log = opts.log || (() => {});
+  const readyTimeoutMs = opts.readyTimeoutMs ?? 15_000;
+  const caTimeoutMs = opts.caTimeoutMs ?? 3_000;
+  const killGraceMs = opts.killGraceMs ?? 2_000;
+  const detached = process.platform !== "win32";
+
   const mitmArgs = [
     "--mode", `local:${target}`,
     "-s", opts.bridgeScript,
     "--set", `looper_sock=${opts.socketPath}`,
     "-v",
   ];
-  const log = opts.log || (() => {});
   const mitm = spawn(mitmdump, mitmArgs, {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...opts.env },
+    detached,
   });
+  const pgids: number[] = [];
+  if (mitm.pid) { pgids.push(mitm.pid); liveGroups.add(mitm.pid); }
   let ready = false;
   const onData = (d: Buffer) => {
     const s = d.toString();
@@ -71,15 +104,15 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
   mitm.stdout?.on("data", onData);
   mitm.stderr?.on("data", onData);
 
-  // wait for mitmproxy local capture to be ready (macOS NE needs time)
-  const deadline = Date.now() + 15000;
+  // Wait for mitmproxy local capture readiness, bounded by config.
+  const deadline = readyTimeoutMs > 0 ? Date.now() + readyTimeoutMs : Infinity;
   while (!ready && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
-  if (!ready) log("[looper] warning: mitmproxy local capture not confirmed ready, proceeding anyway");
+  if (!ready) log(`[looper] warning: mitmproxy local capture not confirmed ready after ${readyTimeoutMs}ms`);
 
   // Resolve mitmproxy CA and inject env for non-proxy-aware/TLS clients.
   let caCert = resolveMitmCa(opts.caCert);
   if (opts.caCert !== false && !caCert) {
-    const caDeadline = Date.now() + 3000;
+    const caDeadline = caTimeoutMs > 0 ? Date.now() + caTimeoutMs : Infinity;
     while (!caCert && Date.now() < caDeadline) {
       await new Promise((r) => setTimeout(r, 200));
       caCert = resolveMitmCa(opts.caCert);
@@ -95,11 +128,26 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
     stdio: "inherit",
     cwd: opts.cwd || process.cwd(),
     env: { ...baseEnv, ...caEnv } as Record<string, string>,
+    detached,
   });
+  if (child.pid) { pgids.push(child.pid); liveGroups.add(child.pid); }
 
-  const kill = (signal: NodeJS.Signals = "SIGTERM") => {
-    try { child.kill(signal); } catch {}
-    try { mitm.kill(signal); } catch {}
+  const handle: ProcHandle = {
+    mitm,
+    child,
+    pgids,
+    settled: false,
+    kill: (signal: NodeJS.Signals = "SIGTERM", grace = killGraceMs) => {
+      if (handle.settled) return;
+      handle.settled = true;
+      for (const pid of pgids) {
+        liveGroups.delete(pid);
+        signalGroup(pid, signal);
+        if (grace > 0 && signal !== "SIGKILL") {
+          setTimeout(() => signalGroup(pid, "SIGKILL"), grace).unref?.();
+        }
+      }
+    },
   };
-  return { mitm, child, kill };
+  return handle;
 }

@@ -14,9 +14,31 @@ export class HookRegistry {
   }
   setClaimSink(fn: (id: FlowId, decision: Decision) => void) { this.claimSink = fn; }
   setLogger(fn: (...args: unknown[]) => void) { this.logger = fn; }
-  on(type: HookType, fn: HookFn, name?: string) { this.hooks.push({ type, fn, name }); return () => this.off(fn); }
+  /** Claim a specific flow. Shared by hook APIs and extension contexts. */
+  holdFlow(id: FlowId, timeoutMs = 30_000) {
+    let settled = false;
+    return {
+      claim: { action: "claim", timeoutMs } as Decision,
+      resolve: (decision: Decision) => {
+        if (settled) return;
+        settled = true;
+        this.claimSink?.(id, decision);
+      },
+    };
+  }
+  on(type: HookType, fn: HookFn, name?: string) {
+    const entry: RegisteredHook = { type, fn, name };
+    this.hooks.push(entry);
+    let removed = false;
+    return () => {
+      if (removed) return;
+      removed = true;
+      this.hooks = this.hooks.filter(h => h !== entry);
+    };
+  }
   off(fn: HookFn) { this.hooks = this.hooks.filter(h => h.fn !== fn); }
   clear() { this.hooks = []; }
+  get count() { return this.hooks.length; }
   async dispatch(msg: BridgeInbound): Promise<Decision> {
     const type = msg.t as HookType | "done";
     const id: FlowId | undefined = (msg as any).id;
@@ -31,17 +53,7 @@ export class HookRegistry {
         get: async <T>(k: string) => this.durable.get<T>(k),
         set: async <T>(k: string, v: T) => { await this.durable.set(k, v); },
       },
-      hold: (timeoutMs = 30000) => {
-        let settled = false;
-        return {
-          claim: { action: "claim", timeoutMs } as Decision,
-          resolve: (decision: Decision) => {
-            if (settled) return;
-            settled = true;
-            this.claimSink?.(id, decision);
-          },
-        };
-      },
+      hold: (timeoutMs = 30000) => this.holdFlow(id, timeoutMs),
       memo: <T>(key: string, fn: () => Promise<T> | T) => this.flows.memo<T>(id, key, fn),
     };
     let decision: Decision = { action: "pass" };

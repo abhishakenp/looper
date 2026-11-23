@@ -70,9 +70,71 @@ export interface LooperConfig {
   mitmdump?: string;
   logLevel?: "debug" | "info" | "warn" | "error";
   interceptMode?: "local" | "regular";
-  // Harness-specific overrides
   harnessEnv?: Record<string, string>;
+  /** Wall-clock budget (ms) for mitmproxy local-mode readiness. 0 = wait indefinitely. */
+  readyTimeoutMs?: number;
+  /** Wall-clock budget (ms) for locating the mitmproxy CA certificate. */
+  caTimeoutMs?: number;
+  /** Namespaced workflow config. Each extension owns its subobject. */
+  fanout?: {
+    enabled?: boolean;
+    concurrency?: number;
+    maxParallel?: number;
+    maxActiveModelRequests?: number;
+    maxSpawns?: number;
+    jobTtlMs?: number;
+    jobIdleGraceMs?: number;
+    supervisorTimeoutMs?: number;
+    idleMs?: number;
+    speculationCap?: number;
+    killGraceMs?: number;
+    readyPolicy?: "wait" | "proceed";
+  };
+  router?: { enabled?: boolean; timeoutMs?: number; backend?: "jev" | "none"; memoCap?: number };
+  cache?: { safeInterception?: boolean; stableInjectionPosition?: boolean; dedupeInjections?: boolean; logMetrics?: boolean };
+  trace?: { redactKeys?: string[]; bodyCapChars?: number; mode?: "redact" | "raw" };
+  security?: { credentialPaths?: string[]; writableRoots?: string[]; trustProjectConfig?: boolean };
+  reload?: { debounceMs?: number; disposeGraceMs?: number; pollMs?: number };
+  /** Per-extension config, namespaced by extension name (file stem). */
+  extensionsConfig?: Record<string, unknown>;
 }
+
+/** Canonical defaults, exported so extensions and docs read the same source of truth. */
+export const DEFAULT_LOOPER_CONFIG: Required<Pick<LooperConfig,
+  "readyTimeoutMs" | "caTimeoutMs" | "logLevel" | "interceptMode" | "captureBodies"
+>> & LooperConfig = {
+  traceDir: "~/.looper/traces",
+  captureBodies: false,
+  extensions: [],
+  bridgeSocket: "",
+  caCert: undefined,
+  mitmdump: "mitmdump",
+  logLevel: "info",
+  interceptMode: "local",
+  harnessEnv: {},
+  readyTimeoutMs: 15_000,
+  caTimeoutMs: 3_000,
+  fanout: {
+    enabled: false,
+    concurrency: 8,
+    maxParallel: 24,
+    maxActiveModelRequests: 16,
+    maxSpawns: 64,
+    jobTtlMs: 1_200_000,
+    jobIdleGraceMs: 20_000,
+    supervisorTimeoutMs: 90_000,
+    idleMs: 45_000,
+    speculationCap: 4,
+    killGraceMs: 2_000,
+    readyPolicy: "wait",
+  },
+  router: { enabled: false, timeoutMs: 1_500, backend: "jev", memoCap: 32 },
+  cache: { safeInterception: true, stableInjectionPosition: true, dedupeInjections: true, logMetrics: true },
+  trace: { redactKeys: ["authorization", "cookie", "token", "api-key", "api_key", "secret", "password"], bodyCapChars: 0, mode: "redact" },
+  security: { credentialPaths: ["~/.ssh", "~/.aws", "~/.config/gh", "~/.mitmproxy"], writableRoots: [], trustProjectConfig: false },
+  reload: { debounceMs: 200, disposeGraceMs: 5_000, pollMs: 2_000 },
+  extensionsConfig: {},
+};
 
 export interface HoldHandle {
   claim: Decision;
@@ -130,11 +192,19 @@ export interface ProcContext {
 }
 
 export interface ExtensionContext {
-  on: (type: HookType, fn: HookFn, name?: string) => void;
+  on: (type: HookType, fn: HookFn, name?: string) => () => void;
   flows: FlowStoreLike;
   log: (...args: unknown[]) => void;
   state: { get<T>(key: string): Promise<T | undefined>; set<T>(key: string, value: T): Promise<void> };
   proc: ProcContext;
+  /** Bounded, failure-safe memo shared across flows (router verdicts, classifications). */
+  memo: <T>(key: string, fn: () => Promise<T> | T) => Promise<T>;
+  /** Deterministic correlation id for a flow. */
+  requestId: (flowId?: FlowId) => string;
+  /** Claim a flow from extension code; resolve() delivers the decision to the bridge. */
+  hold: (flowId: FlowId, timeoutMs?: number) => HoldHandle;
+  /** Register a disposer that runs when THIS extension is reloaded or removed. */
+  effect: (disposer: () => void) => void;
 }
 
 export interface FlowStoreLike {
