@@ -9,6 +9,7 @@ export class BridgeServer {
   private server?: net.Server;
   private handler: HookHandler;
   private socketPath: string;
+  private pendingClaims = new Map<FlowId, net.Socket>();
   constructor(socketPath: string, handler: HookHandler) {
     this.socketPath = socketPath;
     this.handler = handler;
@@ -29,6 +30,9 @@ export class BridgeServer {
   }
   private onConn(conn: net.Socket) {
     let buf = "";
+    conn.on("close", () => {
+      for (const [id, c] of this.pendingClaims) if (c === conn) this.pendingClaims.delete(id);
+    });
     conn.on("data", async (chunk) => {
       buf += chunk.toString("utf8");
       while (buf.includes("\n")) {
@@ -41,6 +45,13 @@ export class BridgeServer {
       }
     });
   }
+  sendDecision(id: FlowId, decision: Decision) {
+    const conn = this.pendingClaims.get(id);
+    if (!conn) return false;
+    this.pendingClaims.delete(id);
+    const out: BridgeOutbound = { t: "decision", id, decision };
+    try { conn.write(JSON.stringify(out) + "\n"); return true; } catch { return false; }
+  }
   private async handle(msg: BridgeInbound, conn: net.Socket) {
     if (msg.t === "hello") return;
     const id: FlowId | undefined = (msg as any).id;
@@ -51,6 +62,9 @@ export class BridgeServer {
       decision = { action: "pass" };
     }
     if (id) {
+      if (decision.action === "claim") {
+        this.pendingClaims.set(id, conn);
+      }
       const out: BridgeOutbound = { t: "decision", id, decision };
       try { conn.write(JSON.stringify(out) + "\n"); } catch {}
     }

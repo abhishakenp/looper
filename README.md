@@ -33,5 +33,11 @@ export default function ({ on, log }: any) {
 ```
 
 ## Status
-v1 core primitives implemented. Workflow plugins (pixel/jev/liza/subagent) are user-side.
+v1 core implemented and hardened:
+- P1 CA trust/env injection for child processes (NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE, GIT_SSL_CAINFO, AWS_CA_BUNDLE, DENO_CERT).
+- P2 async claim-flow (`api.hold()` / `claim` decision) with fail-open timeout.
+- P3 SSE/stream reload stress verified (50 events, 3 reloads, 0 loss/dup); restart trace integrity verified.
+- P4 pi-durable control-plane integration: defineDoc/defineDocFamily/defineTask/MemoryStorage contracts, LooperDurableRuntime, requestId/memo primitives.
+
+Workflow plugins (pixel/jev/liza/subagent) remain user-side in global/project config.
 See `docs/open-items.md`.

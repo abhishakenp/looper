@@ -6,7 +6,8 @@ export type Decision =
   | { action: "respond"; response: ProxyResponse }
   | { action: "drop" }
   | { action: "stream" }
-  | { action: "buffer" };
+  | { action: "buffer" }
+  | { action: "claim"; timeoutMs?: number };
 
 export interface ProxyRequest {
   id: FlowId;
@@ -67,15 +68,47 @@ export interface LooperConfig {
   bridgeSocket?: string;
 }
 
+export interface HoldHandle {
+  claim: Decision;
+  resolve: (decision: Decision) => void;
+}
+
 export interface HookApi {
   flowId: FlowId;
+  requestId: string;
   meta: FlowMeta;
   log: (msg: string, data?: unknown) => void;
   state: {
     get<T>(key: string): Promise<T | undefined>;
     set<T>(key: string, value: T): Promise<void>;
   };
+  hold: (timeoutMs?: number) => HoldHandle;
+  memo<T>(key: string, fn: () => Promise<T> | T): Promise<T>;
 }
 
 export type HookType = "request" | "responseheaders" | "response_chunk" | "response" | "error";
 export type HookFn = (msg: BridgeInbound, api: HookApi) => Promise<Decision | void> | Decision | void;
+
+export interface ProxyExtension {
+  name: string;
+  setup: (ctx: ExtensionContext) => void | Promise<void>;
+}
+
+export interface ExtensionContext {
+  on: (type: HookType, fn: HookFn, name?: string) => void;
+  flows: FlowStoreLike;
+  log: (...args: unknown[]) => void;
+  state: { get<T>(key: string): Promise<T | undefined>; set<T>(key: string, value: T): Promise<void> };
+  proc: { spawn: (opts: any) => Promise<any> };
+}
+
+export interface FlowStoreLike {
+  get(id: FlowId): unknown;
+  ensure(id: FlowId, meta?: Partial<FlowMeta>): unknown;
+  getData<T>(id: FlowId, key: string): T | undefined;
+  setData(id: FlowId, key: string, value: unknown): void;
+}
+
+export function defineExtension(ext: ProxyExtension | ((ctx: ExtensionContext) => void | Promise<void>)): ProxyExtension | ((ctx: ExtensionContext) => void | Promise<void>) {
+  return ext;
+}

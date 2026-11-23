@@ -2,7 +2,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState } from "@looper/core";
+import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, LooperDurableRuntime } from "@looper/core";
 import type { BridgeInbound, Decision, HookFn, HookType } from "@looper/sdk";
 
 const args = process.argv.slice(2);
@@ -39,6 +39,7 @@ await fs.promises.mkdir(traceDir, { recursive: true });
 
 const flows = new FlowStore();
 const durable = new DurableState(path.join(cwd, ".looper"));
+const runtime = new LooperDurableRuntime(path.join(cwd, ".looper"));
 const hooks = new HookRegistry(flows, durable);
 
 function redact(obj: any): any {
@@ -93,10 +94,16 @@ for (const dir of extDirs) {
 }
 
 const server = new BridgeServer(socketPath, async (msg: BridgeInbound) => {
-  trace({ ts: Date.now(), dir: "in", msg });
+  const id = (msg as any).id as string | undefined;
+  if (id) runtime.setSnapshot(`flow:${id}:last`, { t: msg.t, ts: Date.now() }).catch(() => {});
+  trace({ ts: Date.now(), dir: "in", id, requestId: id ? `req_${id}` : undefined, msg });
   const decision = await hooks.dispatch(msg);
-  trace({ ts: Date.now(), dir: "out", id: (msg as any).id, decision });
+  trace({ ts: Date.now(), dir: "out", id, requestId: id ? `req_${id}` : undefined, decision });
   return decision;
+});
+hooks.setClaimSink((id, decision) => {
+  trace({ ts: Date.now(), dir: "out", id, decision, async: true });
+  server.sendDecision(id, decision);
 });
 await server.start();
 console.error(`[looper] bridge ${socketPath}`);

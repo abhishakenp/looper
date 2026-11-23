@@ -57,12 +57,30 @@ def recv_decision(flow_id):
         return {"action":"pass"}
     with LOCK:
         if flow_id in PENDING:
-            return PENDING.pop(flow_id)
-    SOCK.settimeout(TIMEOUT)
+            dec = PENDING.pop(flow_id)
+            if dec.get("action") == "claim":
+                pass
+            else:
+                return dec
+    deadline = time.time() + TIMEOUT
+    claim_deadline = None
     buf = b""
     try:
         while True:
-            chunk = SOCK.recv(65536)
+            wait = max(0.05, min(1.0, deadline - time.time()))
+            if claim_deadline is not None:
+                wait = max(0.05, min(wait, claim_deadline - time.time()))
+            if time.time() > deadline:
+                ctx.log.warn(f"[looper] decision timeout {flow_id}")
+                return {"action":"pass"}
+            if claim_deadline is not None and time.time() > claim_deadline:
+                ctx.log.warn(f"[looper] claim timeout {flow_id}")
+                return {"action":"pass"}
+            SOCK.settimeout(wait)
+            try:
+                chunk = SOCK.recv(65536)
+            except socket.timeout:
+                continue
             if not chunk:
                 raise ConnectionError("closed")
             buf += chunk
@@ -75,6 +93,10 @@ def recv_decision(flow_id):
                     did = msg.get("id")
                     dec = msg.get("decision", {"action":"pass"})
                     if did == flow_id:
+                        if dec.get("action") == "claim":
+                            tmo = int(dec.get("timeoutMs", 30000))
+                            claim_deadline = time.time() + max(0.1, tmo / 1000.0)
+                            continue
                         return dec
                     with LOCK:
                         PENDING[did] = dec

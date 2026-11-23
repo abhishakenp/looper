@@ -1,9 +1,11 @@
 # Open Items / Risks
 
 - [x] **mitmproxy local-mode semantics (macOS):** verified on macOS arm64, mitmproxy 12.2.3, redirector extension activated. `--mode local:<name>` captures child process HTTPS; readiness signal: "Local redirector started/successfully initialized". Proc must wait before spawning harness.
-- [ ] **Bridge latency:** sync decision-per-hook over IPC; mitigate with fail-open timeout + “claim flow” async model for expensive hooks.
-- [ ] **CA trust:** mitmproxy installs/uses CA; env/OS trust varies by harness/runtime. Need per-harness CA injection story (env vars cover many).
-- [ ] **pi-durable API fit:** confirmed runtime/exports exist (`@earendil-works/pi-durable@1.6.0`); need spike to confirm embedding pattern for proxy hook points and FlowState-as-doc/service.
-- [ ] **Socket death on crash:** accepted; durable control plane reconciles.
+- [x] **CA trust/env injection (P1):** `resolveMitmCa` + `buildCaEnv` inject `LOOPER_CA_CERT`, `NODE_EXTRA_CA_CERTS`, and if unset: `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `AWS_CA_BUNDLE`, `DENO_CERT`. Proc waits/polls for CA file. Verified: `looper node -e "fetch('https://example.com')..."` → `LEN=577`, EXIT=0. Broader client matrix still worth expanding.
+- [x] **Bridge latency / async claim-flow (P2):** protocol decision `claim {timeoutMs}` added. bridge.py holds on claim until final decision or claim timeout, fail-open on timeout. BridgeServer tracks pending claims and supports async `sendDecision`. HookApi.hold() returns `{claim, resolve}`. Verified: extension held 500ms then resolved pass → EXIT=0, 577 bytes.
+- [x] **SSE/reload stress (P3):** response_chunk streaming through bridge hooks verified. Stress: 50 SSE events, 3 extension hot reloads during stream → 50/50 received, 0 dups, 0 missing, EXIT=0. Restart: SIGTERM mid-stream → trace valid NDJSON (9 records, 0 bad); live TCP sockets die on crash (accepted). FlowState hardened: chunkCount, streaming, commit, prune.
+- [x] **pi-durable deep integration (P4):** real pi-durable contracts wired: `defineDocFamily` FlowRecordDoc, `defineDoc` ExtensionStateDoc, `defineTask` ClaimTask, `MemoryStorage`-backed `LooperDurableRuntime` snapshot/control-plane. HookApi gained `requestId` + `memo()`. FlowStore tracks requestId/memos/chunk state. Trace records include requestId. Bridge remains invisible to plugins. Full LLM-agent Harness embedding intentionally not used; proxy control plane uses pi-durable primitives where they fit.
+- [ ] **Socket death on crash:** accepted; durable control plane reconciles. Live TCP cannot survive crash.
 - [ ] **Python glue:** accepted for v1; bridge protocol versioned for future Rust capture daemon replacement.
 - [ ] **Linux/Windows local capture:** not verified.
+- [ ] **Deeper CA matrix:** validate Java/Python/Go/Ruby/git/curl variants and system trust edge cases.

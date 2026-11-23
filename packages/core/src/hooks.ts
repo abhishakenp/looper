@@ -7,35 +7,66 @@ interface RegisteredHook { type: HookType; fn: HookFn; name?: string }
 export class HookRegistry {
   private hooks: RegisteredHook[] = [];
   private durable: DurableState;
+  private claimSink?: (id: FlowId, decision: Decision) => void;
   constructor(private flows: FlowStore, durable?: DurableState) {
     this.durable = durable || new DurableState(process.cwd() + "/.looper");
   }
+  setClaimSink(fn: (id: FlowId, decision: Decision) => void) { this.claimSink = fn; }
   on(type: HookType, fn: HookFn, name?: string) { this.hooks.push({ type, fn, name }); return () => this.off(fn); }
   off(fn: HookFn) { this.hooks = this.hooks.filter(h => h.fn !== fn); }
   clear() { this.hooks = []; }
   async dispatch(msg: BridgeInbound): Promise<Decision> {
-    const type = msg.t as HookType;
+    const type = msg.t as HookType | "done";
     const id: FlowId | undefined = (msg as any).id;
     if (!id) return { action: "pass" };
     const flow = this.flows.ensure(id);
     const api: HookApi = {
       flowId: id,
+      requestId: flow.requestId,
       meta: flow.meta,
       log: (m, d) => console.error(`[looper:${type}:${id}] ${m}`, d ?? ""),
       state: {
         get: async <T>(k: string) => this.durable.get<T>(k),
         set: async <T>(k: string, v: T) => { await this.durable.set(k, v); },
       },
+      hold: (timeoutMs = 30000) => {
+        let settled = false;
+        return {
+          claim: { action: "claim", timeoutMs } as Decision,
+          resolve: (decision: Decision) => {
+            if (settled) return;
+            settled = true;
+            this.claimSink?.(id, decision);
+          },
+        };
+      },
+      memo: <T>(key: string, fn: () => Promise<T> | T) => this.flows.memo<T>(id, key, fn),
     };
+    let decision: Decision = { action: "pass" };
     for (const h of this.hooks) {
       if (h.type !== type) continue;
       try {
         const res = await h.fn(msg, api);
-        if (res && res.action && res.action !== "pass") return res as Decision;
+        if (res && res.action && res.action !== "pass") { decision = res as Decision; break; }
       } catch (e) {
         console.error(`[looper] hook error (${h.name || "anon"}):`, e);
       }
     }
-    return { action: "pass" };
+    // FlowState bookkeeping for Q4 / stream robustness
+    if (type === "responseheaders" && decision.action === "stream") this.flows.markStreaming(id, true);
+    if (type === "response_chunk") {
+      const chunk = (msg as any).chunk;
+      if (chunk?.done) this.flows.commit(id);
+      else if (chunk?.data) {
+        try { this.flows.pushChunk(id, Uint8Array.from(Buffer.from(chunk.data, "base64"))); } catch {}
+      }
+    }
+    if (type === "response" || type === "error" || type === "done") {
+      this.flows.commit(id);
+      // keep briefly for late async observers, then prune
+      setTimeout(() => this.flows.delete(id), 30_000).unref?.();
+    }
+    this.flows.prune();
+    return decision;
   }
 }
