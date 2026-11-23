@@ -34,15 +34,21 @@ const socketPath = path.join(runDir, `${sessionId}.sock`);
 const bridgeScript = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../bridge/bridge.py");
 const traceDir = path.join(os.homedir(), ".looper", "traces");
 const traceFile = path.join(traceDir, `${sessionId}.ndjson`);
+const logFile = path.join(runDir, `${sessionId}.log`);
 
 await fs.promises.mkdir(traceDir, { recursive: true });
+await fs.promises.mkdir(runDir, { recursive: true });
+const log = (...args: unknown[]) => {
+  try { fs.appendFileSync(logFile, args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ") + "\n"); } catch {}
+};
 
 const flows = new FlowStore();
 const durable = new DurableState(path.join(cwd, ".looper"));
 const runtime = new LooperDurableRuntime(path.join(cwd, ".looper"));
 const hooks = new HookRegistry(flows, durable);
+hooks.setLogger(log);
 const reconciled = await runtime.reconcile(sessionId);
-if (reconciled.crashedFlows.length) console.error(`[looper] reconciled ${reconciled.crashedFlows.length} crashed flow(s)`);
+if (reconciled.crashedFlows.length) log(`[looper] reconciled ${reconciled.crashedFlows.length} crashed flow(s)`);
 
 function redact(obj: any): any {
   if (!obj || typeof obj !== "object") return obj;
@@ -77,6 +83,7 @@ const procCtx = {
     bridgeScript,
     socketPath,
     intercept: harnessIntercept,
+    log,
     ...overrides,
     env: { ...process.env, ...(overrides.env || {}) },
   }),
@@ -96,15 +103,15 @@ async function loadExtensions() {
       try {
         const mod = await import(path.join(dir, f) + `?t=${Date.now()}`);
         const ext = mod.default || mod.extension || mod;
-        const ctx = { on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log: console.error, state: durable, proc: procCtx };
+        const ctx = { on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log, state: durable, proc: procCtx };
         if (typeof ext === "function") {
           await ext(ctx);
         } else if (ext && typeof ext.setup === "function") {
           await ext.setup(ctx);
         }
-        console.error(`[looper] loaded extension ${f}`);
+        log(`[looper] loaded extension ${f}`);
       } catch (e) {
-        console.error(`[looper] extension load failed ${f}:`, e);
+        log(`[looper] extension load failed ${f}:`, e);
       }
     }
   }
@@ -116,7 +123,7 @@ for (const dir of extDirs) {
   try {
     fs.mkdirSync(dir, { recursive: true });
     let t: any = null;
-    fs.watch(dir, () => { clearTimeout(t); t = setTimeout(() => { console.error("[looper] reloading extensions"); loadExtensions().catch(console.error); }, 200); });
+    fs.watch(dir, () => { clearTimeout(t); t = setTimeout(() => { log("[looper] reloading extensions"); loadExtensions().catch(log); }, 200); });
   } catch {}
 }
 
@@ -133,8 +140,9 @@ hooks.setClaimSink((id, decision) => {
   server.sendDecision(id, decision);
 });
 await server.start();
-console.error(`[looper] bridge ${socketPath}`);
-console.error(`[looper] trace ${traceFile}`);
+log(`[looper] bridge ${socketPath}`);
+log(`[looper] trace ${traceFile}`);
+log(`[looper] log ${logFile}`);
 
 const handle = await spawnProxied({
   harness,
@@ -143,6 +151,7 @@ const handle = await spawnProxied({
   bridgeScript,
   socketPath,
   intercept: path.basename(resolveHarnessBinary(harness)),
+  log,
 });
 
 const cleanup = async () => {

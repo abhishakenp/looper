@@ -8,10 +8,12 @@ export class HookRegistry {
   private hooks: RegisteredHook[] = [];
   private durable: DurableState;
   private claimSink?: (id: FlowId, decision: Decision) => void;
+  private logger: (...args: unknown[]) => void = () => {};
   constructor(private flows: FlowStore, durable?: DurableState) {
     this.durable = durable || new DurableState(process.cwd() + "/.looper");
   }
   setClaimSink(fn: (id: FlowId, decision: Decision) => void) { this.claimSink = fn; }
+  setLogger(fn: (...args: unknown[]) => void) { this.logger = fn; }
   on(type: HookType, fn: HookFn, name?: string) { this.hooks.push({ type, fn, name }); return () => this.off(fn); }
   off(fn: HookFn) { this.hooks = this.hooks.filter(h => h.fn !== fn); }
   clear() { this.hooks = []; }
@@ -24,7 +26,7 @@ export class HookRegistry {
       flowId: id,
       requestId: flow.requestId,
       meta: flow.meta,
-      log: (m, d) => console.error(`[looper:${type}:${id}] ${m}`, d ?? ""),
+      log: (m, d) => this.logger(`[looper:${type}:${id}] ${m}`, d ?? ""),
       state: {
         get: async <T>(k: string) => this.durable.get<T>(k),
         set: async <T>(k: string, v: T) => { await this.durable.set(k, v); },
@@ -49,7 +51,7 @@ export class HookRegistry {
         const res = await h.fn(msg, api);
         if (res && res.action && res.action !== "pass") { decision = res as Decision; break; }
       } catch (e) {
-        console.error(`[looper] hook error (${h.name || "anon"}):`, e);
+        this.logger(`[looper] hook error (${h.name || "anon"}):`, e);
       }
     }
     // FlowState bookkeeping for Q4 / stream robustness

@@ -14,6 +14,7 @@ export interface ProcOptions {
   socketPath: string;
   intercept?: string; // process name or pid spec for mitmproxy local mode
   caCert?: string | false; // path to CA cert, or false to disable injection
+  log?: (msg: string) => void;
 }
 
 export interface ProcHandle {
@@ -56,6 +57,7 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
     "--set", `looper_sock=${opts.socketPath}`,
     "-v",
   ];
+  const log = opts.log || (() => {});
   const mitm = spawn(mitmdump, mitmArgs, {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...opts.env },
@@ -63,7 +65,7 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
   let ready = false;
   const onData = (d: Buffer) => {
     const s = d.toString();
-    process.stderr.write(`[mitm] ${s}`);
+    log(`[mitm] ${s}`);
     if (s.includes("Local redirector started") || s.includes("successfully initialized")) ready = true;
   };
   mitm.stdout?.on("data", onData);
@@ -72,7 +74,7 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
   // wait for mitmproxy local capture to be ready (macOS NE needs time)
   const deadline = Date.now() + 15000;
   while (!ready && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
-  if (!ready) console.error("[looper] warning: mitmproxy local capture not confirmed ready, proceeding anyway");
+  if (!ready) log("[looper] warning: mitmproxy local capture not confirmed ready, proceeding anyway");
 
   // Resolve mitmproxy CA and inject env for non-proxy-aware/TLS clients.
   let caCert = resolveMitmCa(opts.caCert);
@@ -85,8 +87,8 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
   }
   const baseEnv = { ...process.env, ...opts.env } as Record<string, string | undefined>;
   const caEnv = buildCaEnv(caCert, baseEnv);
-  if (caCert) console.error(`[looper] ca ${caCert}`);
-  else if (opts.caCert !== false) console.error("[looper] warning: mitmproxy CA cert not found; TLS clients may fail");
+  if (caCert) log(`[looper] ca ${caCert}`);
+  else if (opts.caCert !== false) log("[looper] warning: mitmproxy CA cert not found; TLS clients may fail");
 
   const bin = resolveHarnessBinary(opts.harness);
   const child = spawn(bin, opts.args, {
