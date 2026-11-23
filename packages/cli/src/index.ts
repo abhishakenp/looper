@@ -41,6 +41,8 @@ const flows = new FlowStore();
 const durable = new DurableState(path.join(cwd, ".looper"));
 const runtime = new LooperDurableRuntime(path.join(cwd, ".looper"));
 const hooks = new HookRegistry(flows, durable);
+const reconciled = await runtime.reconcile(sessionId);
+if (reconciled.crashedFlows.length) console.error(`[looper] reconciled ${reconciled.crashedFlows.length} crashed flow(s)`);
 
 function redact(obj: any): any {
   if (!obj || typeof obj !== "object") return obj;
@@ -120,7 +122,7 @@ for (const dir of extDirs) {
 
 const server = new BridgeServer(socketPath, async (msg: BridgeInbound) => {
   const id = (msg as any).id as string | undefined;
-  if (id) runtime.setSnapshot(`flow:${id}:last`, { t: msg.t, ts: Date.now() }).catch(() => {});
+  if (id) runtime.setSnapshot(`flow:${id}:last`, { t: msg.t, status: msg.t, ts: Date.now(), requestId: `req_${id}` }).catch(() => {});
   trace({ ts: Date.now(), dir: "in", id, requestId: id ? `req_${id}` : undefined, msg });
   const decision = await hooks.dispatch(msg);
   trace({ ts: Date.now(), dir: "out", id, requestId: id ? `req_${id}` : undefined, decision });

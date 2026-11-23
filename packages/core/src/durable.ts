@@ -77,4 +77,27 @@ export class LooperDurableRuntime {
 
   /** Control-plane identity for observability/correlation. */
   requestId(flowId: FlowId): string { return `req_${flowId}`; }
+
+  /** Reconcile durable control plane after crash/restart. Live TCP cannot survive crash. */
+  async reconcile(sessionId: string): Promise<{ crashedFlows: string[] }> {
+    const crashedFlows: string[] = [];
+    const now = Date.now();
+    for (const [k, v] of Object.entries(this.snapshot)) {
+      if (!k.startsWith("flow:") || !k.endsWith(":last")) continue;
+      const rec = v as any;
+      const status = rec?.status || rec?.t;
+      // flows that never reached done/error are considered crashed/orphaned
+      if (status && !["done", "error", "committed", "crashed"].includes(status)) {
+        rec.status = "crashed";
+        rec.crashedAt = now;
+        rec.crashSession = sessionId;
+        this.snapshot[k] = rec;
+        crashedFlows.push(k);
+      }
+    }
+    this.snapshot["looper:last_reconcile"] = { ts: now, sessionId, crashedFlows };
+    await fs.promises.mkdir(path.dirname(this.snapshotFile), { recursive: true });
+    await fs.promises.writeFile(this.snapshotFile, JSON.stringify(this.snapshot, null, 2));
+    return { crashedFlows };
+  }
 }
