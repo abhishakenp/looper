@@ -2,13 +2,27 @@
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary } from "@looper/core";
+import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState } from "@looper/core";
 import type { BridgeInbound, Decision, HookFn, HookType } from "@looper/sdk";
 
 const args = process.argv.slice(2);
 if (args.length === 0) {
-  console.error("Usage: looper <harness> [args...]");
+  console.error("Usage: looper <harness> [args...] | looper trace tail|show [file]");
   process.exit(1);
+}
+
+if (args[0] === "trace") {
+  const sub = args[1] || "tail";
+  const traceDir = path.join(os.homedir(), ".looper", "traces");
+  const file = args[2] || (() => { try { const fs2 = fs.readdirSync(traceDir).filter(f=>f.endsWith(".ndjson")).sort(); return path.join(traceDir, fs2[fs2.length-1]||""); } catch { return ""; } })();
+  if (!file || !fs.existsSync(file)) { console.error("No trace file found"); process.exit(1); }
+  if (sub === "show") { console.log(fs.readFileSync(file, "utf8")); process.exit(0); }
+  // tail
+  let off = 0;
+  const read = () => { try { const s = fs.statSync(file); if (s.size > off) { const fd = fs.openSync(file,"r"); const buf = Buffer.alloc(s.size-off); fs.readSync(fd,buf,0,buf.length,off); fs.closeSync(fd); process.stdout.write(buf.toString("utf8")); off=s.size; } } catch {} };
+  read(); fs.watchFile(file,{interval:500},read);
+  process.on("SIGINT",()=>process.exit(0));
+  await new Promise(()=>{});
 }
 
 const harness = args[0];
@@ -24,28 +38,40 @@ const traceFile = path.join(traceDir, `${sessionId}.ndjson`);
 await fs.promises.mkdir(traceDir, { recursive: true });
 
 const flows = new FlowStore();
-const hooks = new HookRegistry(flows);
+const durable = new DurableState(path.join(cwd, ".looper"));
+const hooks = new HookRegistry(flows, durable);
 
+function redact(obj: any): any {
+  if (!obj || typeof obj !== "object") return obj;
+  if (Array.isArray(obj)) return obj.map(redact);
+  const out: any = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (/authorization|cookie|token|api[-_]?key|secret|password/i.test(k)) out[k] = "[REDACTED]";
+    else out[k] = redact(v);
+  }
+  return out;
+}
 function trace(obj: unknown) {
-  try { fs.appendFileSync(traceFile, JSON.stringify(obj) + "\n"); } catch {}
+  try { fs.appendFileSync(traceFile, JSON.stringify(redact(obj)) + "\n"); } catch {}
 }
 
 // Load extensions from global and project dirs
+const extDirs = [
+  path.join(os.homedir(), ".looper", "extensions"),
+  path.join(cwd, ".looper", "extensions"),
+];
 async function loadExtensions() {
-  const dirs = [
-    path.join(os.homedir(), ".looper", "extensions"),
-    path.join(cwd, ".looper", "extensions"),
-  ];
-  for (const dir of dirs) {
+  hooks.clear();
+  for (const dir of extDirs) {
     if (!fs.existsSync(dir)) continue;
     for (const f of fs.readdirSync(dir).filter(x => x.endsWith(".ts") || x.endsWith(".js") || x.endsWith(".mjs"))) {
       try {
-        const mod = await import(path.join(dir, f));
+        const mod = await import(path.join(dir, f) + `?t=${Date.now()}`);
         const ext = mod.default || mod.extension || mod;
         if (typeof ext === "function") {
-          await ext({ on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log: console.error });
+          await ext({ on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log: console.error, state: durable });
         } else if (ext && typeof ext.setup === "function") {
-          await ext.setup({ on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log: console.error });
+          await ext.setup({ on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log: console.error, state: durable });
         }
         console.error(`[looper] loaded extension ${f}`);
       } catch (e) {
@@ -54,8 +80,16 @@ async function loadExtensions() {
     }
   }
 }
-
 await loadExtensions();
+
+// hot reload
+for (const dir of extDirs) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    let t: any = null;
+    fs.watch(dir, () => { clearTimeout(t); t = setTimeout(() => { console.error("[looper] reloading extensions"); loadExtensions().catch(console.error); }, 200); });
+  } catch {}
+}
 
 const server = new BridgeServer(socketPath, async (msg: BridgeInbound) => {
   trace({ ts: Date.now(), dir: "in", msg });

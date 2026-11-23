@@ -1,11 +1,15 @@
 import type { BridgeInbound, Decision, HookApi, FlowId, HookFn, HookType } from "@looper/sdk";
 import { FlowStore } from "./flow.js";
+import { DurableState } from "./state.js";
 
 interface RegisteredHook { type: HookType; fn: HookFn; name?: string }
 
 export class HookRegistry {
   private hooks: RegisteredHook[] = [];
-  constructor(private flows: FlowStore) {}
+  private durable: DurableState;
+  constructor(private flows: FlowStore, durable?: DurableState) {
+    this.durable = durable || new DurableState(process.cwd() + "/.looper");
+  }
   on(type: HookType, fn: HookFn, name?: string) { this.hooks.push({ type, fn, name }); return () => this.off(fn); }
   off(fn: HookFn) { this.hooks = this.hooks.filter(h => h.fn !== fn); }
   clear() { this.hooks = []; }
@@ -19,8 +23,8 @@ export class HookRegistry {
       meta: flow.meta,
       log: (m, d) => console.error(`[looper:${type}:${id}] ${m}`, d ?? ""),
       state: {
-        get: async <T>(k: string) => this.flows.getData<T>(id, k),
-        set: async <T>(k: string, v: T) => { this.flows.setData(id, k, v); },
+        get: async <T>(k: string) => this.durable.get<T>(k),
+        set: async <T>(k: string, v: T) => { await this.durable.set(k, v); },
       },
     };
     for (const h of this.hooks) {

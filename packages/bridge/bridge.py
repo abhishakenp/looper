@@ -148,6 +148,31 @@ def request(flow):
     if send(msg):
         apply_request(flow, recv_decision(fid))
 
+def make_stream(fid):
+    def stream(chunks):
+        # mitmproxy may pass bytes or iterable[bytes]
+        if isinstance(chunks, (bytes, bytearray)):
+            chunks = [bytes(chunks)]
+        for chunk in chunks:
+            if isinstance(chunk, int):
+                chunk = bytes([chunk])
+            if isinstance(chunk, str):
+                chunk = chunk.encode()
+            msg = {"t":"response_chunk","id":fid,"chunk":{"id":fid,"direction":"response","data":base64.b64encode(chunk).decode(),"done":False}}
+            if send(msg):
+                d = recv_decision(fid)
+                a = d.get("action")
+                if a == "drop":
+                    return
+                if a == "mutate":
+                    new = d.get("chunk", {}).get("data")
+                    if new:
+                        try: chunk = base64.b64decode(new)
+                        except Exception: chunk = new.encode()
+            yield chunk
+        send({"t":"response_chunk","id":fid,"chunk":{"id":fid,"direction":"response","data":"","done":True}})
+    return stream
+
 def responseheaders(flow):
     fid = flow_id(flow)
     msg = {"t":"responseheaders","id":fid,"res":{"id":fid,"status":flow.response.status_code,"headers":dict(flow.response.headers)}}
@@ -155,7 +180,7 @@ def responseheaders(flow):
         d = recv_decision(fid)
         a = d.get("action")
         if a == "stream":
-            flow.response.stream = True
+            flow.response.stream = make_stream(fid)
         elif a == "buffer":
             flow.response.stream = False
         elif a == "drop":
