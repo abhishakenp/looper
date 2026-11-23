@@ -94,12 +94,41 @@ export interface ProxyExtension {
   setup: (ctx: ExtensionContext) => void | Promise<void>;
 }
 
+export interface ProcSpawnOptions {
+  harness?: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  mitmdump?: string;
+  bridgeScript?: string;
+  socketPath?: string;
+  intercept?: string;
+  caCert?: string | false;
+}
+
+export interface ProcContext {
+  /** Original harness name as invoked via looper */
+  harness: string;
+  /** Original argv passed to harness (never mutated) */
+  args: readonly string[];
+  cwd: string;
+  env: Record<string, string | undefined>;
+  bin: string;
+  intercept: string;
+  bridgeScript: string;
+  socketPath: string;
+  /** Spawn a proxied subprocess. Defaults inherit the current looper/harness invocation details. */
+  spawn: (overrides?: ProcSpawnOptions) => Promise<any>;
+  /** Raw low-level spawnProxied */
+  spawnProxied: (opts: any) => Promise<any>;
+}
+
 export interface ExtensionContext {
   on: (type: HookType, fn: HookFn, name?: string) => void;
   flows: FlowStoreLike;
   log: (...args: unknown[]) => void;
   state: { get<T>(key: string): Promise<T | undefined>; set<T>(key: string, value: T): Promise<void> };
-  proc: { spawn: (opts: any) => Promise<any> };
+  proc: ProcContext;
 }
 
 export interface FlowStoreLike {

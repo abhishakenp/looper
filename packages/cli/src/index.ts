@@ -56,6 +56,31 @@ function trace(obj: unknown) {
   try { fs.appendFileSync(traceFile, JSON.stringify(redact(obj)) + "\n"); } catch {}
 }
 
+const harnessArgs = Object.freeze([...rest]);
+const harnessBin = resolveHarnessBinary(harness);
+const harnessIntercept = path.basename(harnessBin);
+const procCtx = {
+  harness,
+  args: harnessArgs,
+  cwd,
+  env: { ...process.env } as Record<string, string | undefined>,
+  bin: harnessBin,
+  intercept: harnessIntercept,
+  bridgeScript,
+  socketPath,
+  spawn: (overrides: any = {}) => spawnProxied({
+    harness,
+    args: [...harnessArgs],
+    cwd,
+    bridgeScript,
+    socketPath,
+    intercept: harnessIntercept,
+    ...overrides,
+    env: { ...process.env, ...(overrides.env || {}) },
+  }),
+  spawnProxied,
+};
+
 // Load extensions from global and project dirs
 const extDirs = [
   path.join(os.homedir(), ".looper", "extensions"),
@@ -69,7 +94,7 @@ async function loadExtensions() {
       try {
         const mod = await import(path.join(dir, f) + `?t=${Date.now()}`);
         const ext = mod.default || mod.extension || mod;
-        const ctx = { on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log: console.error, state: durable, proc: { spawn: spawnProxied } };
+        const ctx = { on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log: console.error, state: durable, proc: procCtx };
         if (typeof ext === "function") {
           await ext(ctx);
         } else if (ext && typeof ext.setup === "function") {
