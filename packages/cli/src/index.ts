@@ -3,7 +3,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, LooperDurableRuntime } from "@looper/core";
-import type { BridgeInbound, Decision, HookFn, HookType } from "@looper/sdk";
+import type { BridgeInbound, Decision, HookFn, HookType, LooperConfig } from "@looper/sdk";
 
 const args = process.argv.slice(2);
 if (args.length === 0) {
@@ -42,6 +42,22 @@ const log = (...args: unknown[]) => {
   try { fs.appendFileSync(logFile, args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ") + "\n"); } catch {}
 };
 
+// Load config from global and project
+function loadConfig(): LooperConfig {
+  const globalPath = path.join(os.homedir(), ".looper", "config.json");
+  const projectPath = path.join(cwd, ".looper", "config.json");
+  let config: LooperConfig = {};
+  for (const p of [globalPath, projectPath]) {
+    try {
+      const c = JSON.parse(fs.readFileSync(p, "utf8"));
+      config = { ...config, ...c };
+    } catch {}
+  }
+  return config;
+}
+const config = loadConfig();
+log(`[looper] config`, config);
+
 const flows = new FlowStore();
 const durable = new DurableState(path.join(cwd, ".looper"));
 const runtime = new LooperDurableRuntime(path.join(cwd, ".looper"));
@@ -76,6 +92,7 @@ const procCtx = {
   intercept: harnessIntercept,
   bridgeScript,
   socketPath,
+  config,
   spawn: (overrides: any = {}) => spawnProxied({
     harness,
     args: [...harnessArgs],
@@ -83,9 +100,11 @@ const procCtx = {
     bridgeScript,
     socketPath,
     intercept: harnessIntercept,
+    caCert: config.caCert,
+    mitmdump: config.mitmdump,
     log,
     ...overrides,
-    env: { ...process.env, ...(overrides.env || {}) },
+    env: { ...process.env, ...config.harnessEnv, ...(overrides.env || {}) },
   }),
   spawnProxied,
 };
@@ -151,6 +170,8 @@ const handle = await spawnProxied({
   bridgeScript,
   socketPath,
   intercept: path.basename(resolveHarnessBinary(harness)),
+  caCert: config.caCert,
+  mitmdump: config.mitmdump,
   log,
 });
 

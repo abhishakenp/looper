@@ -5,3 +5,4 @@ export * from "./proc.js";
 export * from "./util.js";
 export * from "./state.js";
 export * from "./durable.js";
+export * from "./workflows/detect.js";

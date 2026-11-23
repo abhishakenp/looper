@@ -66,6 +66,12 @@ export interface LooperConfig {
   captureBodies?: boolean;
   extensions?: string[];
   bridgeSocket?: string;
+  caCert?: string | false;
+  mitmdump?: string;
+  logLevel?: "debug" | "info" | "warn" | "error";
+  interceptMode?: "local" | "regular";
+  // Harness-specific overrides
+  harnessEnv?: Record<string, string>;
 }
 
 export interface HoldHandle {
