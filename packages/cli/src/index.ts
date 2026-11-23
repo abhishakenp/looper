@@ -68,10 +68,11 @@ async function loadExtensions() {
       try {
         const mod = await import(path.join(dir, f) + `?t=${Date.now()}`);
         const ext = mod.default || mod.extension || mod;
+        const ctx = { on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log: console.error, state: durable, proc: { spawn: spawnProxied } };
         if (typeof ext === "function") {
-          await ext({ on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log: console.error, state: durable });
+          await ext(ctx);
         } else if (ext && typeof ext.setup === "function") {
-          await ext.setup({ on: (t: HookType, fn: HookFn, name?: string) => hooks.on(t, fn, name || f), flows, log: console.error, state: durable });
+          await ext.setup(ctx);
         }
         console.error(`[looper] loaded extension ${f}`);
       } catch (e) {
