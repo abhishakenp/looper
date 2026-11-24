@@ -19,3 +19,4 @@ export * from "./workflows/adversarial.js";
 export * from "./workflows/liza-wrap.js";
 export * from "./workflows/ownership.js";
 export * from "./workflows/verify-gate.js";
+export * from "./durable-v2.js";
