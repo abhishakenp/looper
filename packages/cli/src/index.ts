@@ -2,7 +2,8 @@
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, LooperDurableRuntime, MemoStore, stateRoot, expandTilde, loadConfig as loadLooperConfig } from "@looper/core";
+import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, LooperDurableRuntime, MemoStore, WakeBus, stateRoot, expandTilde, loadConfig as loadLooperConfig } from "@looper/core";
+import { safeAppendContext } from "@looper/core";
 import type { BridgeInbound, Decision, HookFn, HookType } from "@looper/sdk";
 
 const args = process.argv.slice(2);
@@ -55,6 +56,31 @@ const logError = (...args: unknown[]) => logAt("error", ...args);
 logDebug(`[looper] config layers: ${layers.map(l => l.name).join(" | ")}`);
 logDebug(`[looper] project config trusted: ${projectTrusted}`);
 logDebug(`[looper] config`, config);
+
+// User-side resources: agents/skills/prompts are policy text, not mechanism.
+// They live in ~/.looper and <project>/.looper and are exposed to extensions.
+function loadMarkdownDirs(): { agents: any[]; skills: any[]; prompts: any[] } {
+  const out: { agents: any[]; skills: any[]; prompts: any[] } = { agents: [], skills: [], prompts: [] };
+  for (const base of [path.join(os.homedir(), ".looper"), path.join(cwd, ".looper")]) {
+    for (const kind of ["agents", "skills", "prompts"] as const) {
+      const dir = path.join(base, kind);
+      if (!fs.existsSync(dir)) continue;
+      const walk = (p: string) => {
+        for (const e of fs.readdirSync(p, { withFileTypes: true })) {
+          const fp = path.join(p, e.name);
+          if (e.isDirectory()) walk(fp);
+          else if (e.name.endsWith(".md")) {
+            try { out[kind].push({ name: e.name.replace(/\.md$/, ""), path: fp, content: fs.readFileSync(fp, "utf8") }); } catch {}
+          }
+        }
+      };
+      walk(dir);
+    }
+  }
+  return out;
+}
+const resources = loadMarkdownDirs();
+const wakeBus = new WakeBus();
 
 const flows = new FlowStore();
 const stateDir = stateRoot(cwd);
@@ -126,9 +152,33 @@ const procCtx = {
 // Bridge server first — extensions need it to drain in-flight claims on reload.
 const server = new BridgeServer(socketPath, async (msg: BridgeInbound) => {
   const id = (msg as any).id as string | undefined;
+  if (msg.t === "response" || msg.t === "error" || msg.t === "done") wakeBus.setBusy(false);
   if (id) runtime.setSnapshot(`flow:${id}:last`, { t: msg.t, status: msg.t, ts: Date.now(), requestId: `req_${id}` }).catch(() => {});
   trace({ ts: Date.now(), dir: "in", id, requestId: id ? `req_${id}` : undefined, msg });
+  // Inject queued follow-ups at a request boundary, cache-safely.
+  if (msg.t === "request") {
+    const wakes = wakeBus.drain();
+    if (wakes.length) {
+      try {
+        const raw = (msg as any).req?.body;
+        const body = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (body && Array.isArray(body.messages)) {
+          const r = await safeAppendContext({
+            body,
+            text: wakes.map(w => `[looper wake ${w.generation}] ${w.text}`).join("\n"),
+            key: "wake",
+            seen: durable as any,
+          } as any);
+          if (r.injected) {
+            (msg as any).req.body = (r.decision as any).request.body;
+            log(`[looper] injected ${wakes.length} wake(s) at boundary`);
+          }
+        }
+      } catch (e) { log("[looper] wake injection failed", e); }
+    }
+  }
   const decision = await hooks.dispatch(msg);
+  if (msg.t === "request") wakeBus.setBusy(true);
   trace({ ts: Date.now(), dir: "out", id, requestId: id ? `req_${id}` : undefined, decision });
   return decision;
 });
@@ -193,6 +243,8 @@ function makeCtx(file: string, disposers: Array<() => void>) {
     hold: (flowId: string, timeoutMs?: number) => hooks.holdFlow(flowId, timeoutMs),
     effect: (disposer: () => void) => { disposers.push(disposer); },
     config: (config.extensionsConfig || {})[name.replace(/\.(ts|js|mjs)$/, "")] || {},
+    resources,
+    wake: wakeBus,
   };
 }
 

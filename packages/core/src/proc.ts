@@ -81,7 +81,6 @@ process.on("exit", () => {
 
 export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
   const mitmdump = opts.mitmdump || "mitmdump";
-  const target = opts.intercept || opts.harness;
   const log = opts.log || (() => {});
   const readyTimeoutMs = opts.readyTimeoutMs ?? 30_000;
   const caTimeoutMs = opts.caTimeoutMs ?? 3_000;
@@ -89,45 +88,9 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
   const mode = opts.interceptMode ?? "local";
   const proxyPort = opts.proxyPort ?? 8080;
   const detached = process.platform !== "win32";
+  const pidScope = mode === "local" && detached;
 
-  const mitmArgs = mode === "regular"
-    ? ["--mode", "regular", "--listen-port", String(proxyPort)]
-    : ["--mode", `local:${target}`];
-  mitmArgs.push(
-    "-s", opts.bridgeScript,
-    "--set", `looper_sock=${opts.socketPath}`,
-    "-v",
-  );
-  const mitm = spawn(mitmdump, mitmArgs, {
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, ...opts.env, LOOPER_CAPTURE_BODIES: opts.captureBodies ? "1" : "0" } as Record<string, string>,
-    detached,
-  });
-  const pgids: number[] = [];
-  if (mitm.pid) { pgids.push(mitm.pid); liveGroups.add(mitm.pid); }
-  let ready = false;
-  let readyTail = "";
-  const onData = (d: Buffer) => {
-    const s = d.toString();
-    log(`[mitm] ${s}`);
-    // A readiness phrase can be split across socket chunks — accumulate.
-    readyTail = (readyTail + s).slice(-4096);
-    if (
-      readyTail.includes("Local redirector started") ||
-      readyTail.includes("successfully initialized") ||
-      /\[looper\] connected /.test(readyTail) ||
-      (mode === "regular" && /Proxy server listening|Listening at http/i.test(readyTail))
-    ) ready = true;
-  };
-  mitm.stdout?.on("data", onData);
-  mitm.stderr?.on("data", onData);
-
-  // Wait for mitmproxy local capture readiness, bounded by config.
-  const deadline = readyTimeoutMs > 0 ? Date.now() + readyTimeoutMs : Infinity;
-  while (!ready && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
-  if (!ready) log(`[looper] warning: mitmproxy local capture not confirmed ready after ${readyTimeoutMs}ms`);
-
-  // Resolve mitmproxy CA and inject env for non-proxy-aware/TLS clients.
+  // CA must be resolved before the harness starts — its first request may be TLS.
   let caCert = resolveMitmCa(opts.caCert);
   if (opts.caCert !== false && !caCert) {
     const caDeadline = caTimeoutMs > 0 ? Date.now() + caTimeoutMs : Infinity;
@@ -139,17 +102,16 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
   const baseEnv = { ...process.env, ...opts.env } as Record<string, string | undefined>;
   if (mode === "regular") {
     const proxy = `http://127.0.0.1:${proxyPort}`;
-    baseEnv.HTTP_PROXY = proxy;
-    baseEnv.HTTPS_PROXY = proxy;
-    baseEnv.ALL_PROXY = proxy;
-    baseEnv.http_proxy = proxy;
-    baseEnv.https_proxy = proxy;
+    for (const k of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy"]) baseEnv[k] = proxy;
   }
   const caEnv = buildCaEnv(caCert, baseEnv);
   if (caCert) log(`[looper] ca ${caCert}`);
   else if (opts.caCert !== false) log("[looper] warning: mitmproxy CA cert not found; TLS clients may fail");
 
+  // Spawn the harness FIRST, paused, so mitmproxy can scope to its PID. A name
+  // spec (`local:curl`) captures every process with that name — measured.
   const bin = resolveHarnessBinary(opts.harness);
+  const pgids: number[] = [];
   const child = spawn(bin, opts.args, {
     stdio: "inherit",
     cwd: opts.cwd || process.cwd(),
@@ -157,6 +119,44 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
     detached,
   });
   if (child.pid) { pgids.push(child.pid); liveGroups.add(child.pid); }
+  if (pidScope && child.pid) {
+    try { process.kill(child.pid, "SIGSTOP"); } catch {}
+  }
+
+  const target = pidScope && child.pid ? String(child.pid) : (opts.intercept || opts.harness);
+  log(`[looper] capture scope: ${pidScope ? `pid ${target}` : mode === "regular" ? `proxy :${proxyPort}` : `name ${target}`}`);
+  const mitmArgs = mode === "regular"
+    ? ["--mode", "regular", "--listen-port", String(proxyPort)]
+    : ["--mode", `local:${target}`];
+  mitmArgs.push("-s", opts.bridgeScript, "--set", `looper_sock=${opts.socketPath}`, "-v");
+  const mitm = spawn(mitmdump, mitmArgs, {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, ...opts.env, LOOPER_CAPTURE_BODIES: opts.captureBodies ? "1" : "0" } as Record<string, string>,
+    detached,
+  });
+  if (mitm.pid) { pgids.push(mitm.pid); liveGroups.add(mitm.pid); }
+  let ready = false;
+  let readyTail = "";
+  const onData = (d: Buffer) => {
+    const s = d.toString();
+    log(`[mitm] ${s}`);
+    readyTail = (readyTail + s).slice(-4096);
+    if (
+      readyTail.includes("Local redirector started") ||
+      readyTail.includes("successfully initialized") ||
+      /\[looper\] connected /.test(readyTail) ||
+      (mode === "regular" && /Proxy server listening|Listening at http/i.test(readyTail))
+    ) ready = true;
+  };
+  mitm.stdout?.on("data", onData);
+  mitm.stderr?.on("data", onData);
+  const deadline = readyTimeoutMs > 0 ? Date.now() + readyTimeoutMs : Infinity;
+  while (!ready && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200));
+  if (!ready) log(`[looper] warning: mitmproxy local capture not confirmed ready after ${readyTimeoutMs}ms`);
+  // Release the harness only after capture is ready.
+  if (pidScope && child.pid) {
+    try { process.kill(child.pid, "SIGCONT"); } catch {}
+  }
 
   const handle: ProcHandle = {
     mitm,
@@ -169,9 +169,7 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
       for (const pid of pgids) {
         liveGroups.delete(pid);
         signalGroup(pid, signal);
-        if (grace > 0 && signal !== "SIGKILL") {
-          setTimeout(() => signalGroup(pid, "SIGKILL"), grace).unref?.();
-        }
+        if (grace > 0 && signal !== "SIGKILL") setTimeout(() => signalGroup(pid, "SIGKILL"), grace).unref?.();
       }
     },
   };

@@ -212,6 +212,10 @@ export interface ExtensionContext {
   effect: (disposer: () => void) => void;
   /** This extension's namespaced config (`config.extensionsConfig[fileStem]`). */
   config: Record<string, unknown>;
+  /** User-side policy markdown from ~/.looper and .looper (agents/skills/prompts). */
+  resources: { agents: any[]; skills: any[]; prompts: any[] };
+  /** One-wake-per-generation bus for parent follow-ups. */
+  wake: { emit(generation: number, text: string): boolean; drain(): any[]; setBusy(v: boolean): void; pending: number };
 }
 
 export interface FlowStoreLike {
