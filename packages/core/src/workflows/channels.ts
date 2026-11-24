@@ -40,12 +40,13 @@ export interface AugmentResult {
 const PASS: Decision = { action: "pass" };
 
 /** Append a visible block to an SSE response before the [DONE] sentinel. */
-export function injectSseChunk(sse: string, text: string, key: string): string {
-  const tag = `<looper:${key}>`;
+export function injectSseChunk(sse: string, text: string, key: string, uiOnly = true): string {
+  const name = uiOnly ? "looper-ui" : "looper";
+  const tag = `<${name}:${key}>`;
   if (sse.includes(tag)) return sse;
   const chunk = `data: ${JSON.stringify({
     object: "chat.completion.chunk",
-    choices: [{ index: 0, delta: { role: "assistant", content: `\n\n${tag}\n${text}\n</looper:${key}>` }, finish_reason: null }],
+    choices: [{ index: 0, delta: { role: "assistant", content: `\n\n${tag}\n${text}\n</${name}:${key}>` }, finish_reason: null }],
   })}\n\n`;
   const marker = "data: [DONE]";
   const i = sse.indexOf(marker);
@@ -53,8 +54,9 @@ export function injectSseChunk(sse: string, text: string, key: string): string {
 }
 
 /** Append a visible block to a decoded JSON response body. */
-export function injectJsonResponse(obj: Record<string, any>, text: string, key: string): Record<string, any> {
-  const tag = `<looper:${key}>`;
+export function injectJsonResponse(obj: Record<string, any>, text: string, key: string, uiOnly = true): Record<string, any> {
+  const name = uiOnly ? "looper-ui" : "looper";
+  const tag = `<${name}:${key}>`;
   const choice = obj?.choices?.[0];
   if (!choice) return obj;
   const msg = choice.message || {};
@@ -62,8 +64,44 @@ export function injectJsonResponse(obj: Record<string, any>, text: string, key: 
   if (current.includes(tag)) return obj;
   return {
     ...obj,
-    choices: [{ ...choice, message: { ...msg, content: current + `\n\n${tag}\n${text}\n</looper:${key}>` } }],
+    choices: [{ ...choice, message: { ...msg, content: current + `\n\n${tag}\n${text}\n</${name}:${key}>` } }],
   };
+}
+
+/**
+ * Strip response-injected blocks from a request before it reaches the LLM.
+ *
+ * Real-traffic proof (s_1795464246631_dv8u3s.ndjson): 218/353 assistant messages
+ * in later requests contained prior response text, and ALL 7939 assistant messages
+ * sat in the cached prefix (index < len-1). So a response-only injection is echoed
+ * back by the harness and WILL break the next cache unless removed here.
+ * The client already saw it; the LLM never does; the prefix hash is restored.
+ */
+export function stripInjectedResponseBlocks(body: Record<string, any>, keys: string[]): { body: Record<string, any>; removed: string[] } {
+  const removed: string[] = [];
+  const msgs = Array.isArray(body.messages) ? body.messages : [];
+  const next = msgs.map((m: any) => {
+    if (!m || typeof m !== "object" || m.role !== "assistant") return m;
+    let c = m.content;
+    if (Array.isArray(c)) {
+      c = c.map((part: any) => {
+        if (!part || typeof part !== "object" || typeof part.text !== "string") return part;
+        let t = part.text;
+        for (const k of keys) {
+          const re = new RegExp(`\\n\\n<looper-ui:${k}>[\\s\\S]*?</looper-ui:${k}>`, "g");
+          if (re.test(t)) { t = t.replace(re, ""); removed.push(k); }
+        }
+        return { ...part, text: t };
+      });
+    } else if (typeof c === "string") {
+      for (const k of keys) {
+        const re = new RegExp(`\\n\\n<looper-ui:${k}>[\\s\\S]*?</looper-ui:${k}>`, "g");
+        if (re.test(c)) { c = c.replace(re, ""); removed.push(k); }
+      }
+    }
+    return { ...m, content: c };
+  });
+  return { body: { ...body, messages: next }, removed };
 }
 
 /** Compute both decisions. Fail-open: a cache breach yields pass on the request. */
@@ -78,9 +116,16 @@ export async function augment(opts: AugmentOptions): Promise<AugmentResult> {
     const rb = opts.responseBody;
     let mutated: unknown;
     if (typeof rb === "string" && (rb.includes("data: ") || rb.includes("[DONE]"))) {
-      mutated = injectSseChunk(rb, opts.text, opts.key);
+      mutated = injectSseChunk(rb, opts.text, opts.key, opts.channel === "response-only");
     } else if (rb && typeof rb === "object" && !Array.isArray(rb)) {
-      mutated = injectJsonResponse(rb as Record<string, any>, opts.text, opts.key);
+      mutated = injectJsonResponse(rb as Record<string, any>, opts.text, opts.key, opts.channel === "response-only");
+    } else if (typeof rb === "string") {
+      try {
+        const parsed = JSON.parse(rb);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          mutated = injectJsonResponse(parsed, opts.text, opts.key, opts.channel === "response-only");
+        }
+      } catch { /* non-JSON body: no injection */ }
     }
     if (mutated !== undefined && mutated !== rb) {
       // bridge.py apply_response sets flow.response.text from decision.response.body

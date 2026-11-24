@@ -1,6 +1,7 @@
 import type { BridgeInbound, Decision, HookApi, FlowId, HookFn, HookType } from "@looper/sdk";
 import { FlowStore } from "./flow.js";
 import { DurableState } from "./state.js";
+import { stripInjectedResponseBlocks } from "./workflows/channels.js";
 
 interface RegisteredHook { type: HookType; fn: HookFn; name?: string }
 
@@ -43,6 +44,21 @@ export class HookRegistry {
     const type = msg.t as HookType | "done";
     const id: FlowId | undefined = (msg as any).id;
     if (!id) return { action: "pass" };
+    // The harness echoes assistant response text into the next request's cached
+    // prefix. Remove UI-only injection blocks BEFORE hooks/LLM so cache is intact.
+    if (type === "request" && (msg as any).req?.body) {
+      const req = (msg as any).req;
+      try {
+        const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+        if (body && Array.isArray(body.messages)) {
+          const stripped = stripInjectedResponseBlocks(body, ["[A-Za-z0-9_-]+"]);
+          if (stripped.removed.length) {
+            req.body = typeof req.body === "string" ? JSON.stringify(stripped.body) : stripped.body;
+            this.logger(`[looper] stripped ${stripped.removed.length} UI-only block(s) from request (cache preserved)`);
+          }
+        }
+      } catch { /* malformed body: fail-open, let hooks handle it */ }
+    }
     const flow = this.flows.ensure(id);
     const api: HookApi = {
       flowId: id,
