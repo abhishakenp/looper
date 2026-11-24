@@ -142,6 +142,7 @@ const procCtx = {
     interceptMode: config.interceptMode,
     proxyPort: config.proxyPort,
     captureBodies: config.captureBodies,
+    captureScope: config.captureScope,
     log: logDebug,
     ...overrides,
     env: { ...process.env, ...config.harnessEnv, ...(overrides.env || {}) },
@@ -344,6 +345,7 @@ const handle = await spawnProxied({
   interceptMode: config.interceptMode,
   proxyPort: config.proxyPort,
   captureBodies: config.captureBodies,
+  captureScope: config.captureScope,
   log: logDebug,
 });
 

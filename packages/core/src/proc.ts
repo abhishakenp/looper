@@ -27,6 +27,8 @@ export interface ProcOptions {
   proxyPort?: number;
   /** Whether mitmdump captures request/response bodies. Default false. */
   captureBodies?: boolean;
+  /** "pid" scopes to the child only; "name" also captures descendant processes (subagents/daemons). */
+  captureScope?: "pid" | "name";
 }
 
 export interface ProcHandle {
@@ -88,7 +90,7 @@ export async function spawnProxied(opts: ProcOptions): Promise<ProcHandle> {
   const mode = opts.interceptMode ?? "local";
   const proxyPort = opts.proxyPort ?? 8080;
   const detached = process.platform !== "win32";
-  const pidScope = mode === "local" && detached;
+  const pidScope = mode === "local" && detached && (opts.captureScope ?? "pid") === "pid";
 
   // CA must be resolved before the harness starts — its first request may be TLS.
   let caCert = resolveMitmCa(opts.caCert);

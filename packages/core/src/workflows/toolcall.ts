@@ -84,4 +84,52 @@ export class ToolCallAccumulator {
     const escaped = oldArgs.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return body.replace(escaped, newArgs);
   }
+
+  /**
+   * When the accumulated arguments finally parse as JSON, compute the replacement
+   * for the CURRENT (last) fragment. Earlier fragments already streamed and are
+   * unchanged; we append our field before the closing brace and emit only the
+   * remainder. Returns null until the arguments are complete.
+   */
+  completeRewrite(index: number, context: string): { current: string; replacement: string; prefixLen: number } | null {
+    const c = this.state.calls.get(index);
+    if (!c || !c.arguments) return null;
+    let parsed: any;
+    try { parsed = JSON.parse(c.arguments); } catch { return null; }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const key = "looper_context";
+    if (typeof parsed[key] === "string" && parsed[key].includes(context)) return null;
+    parsed[key] = typeof parsed[key] === "string" ? `${parsed[key]}\n${context}` : context;
+    const full = JSON.stringify(parsed);
+    const prefixLen = this.prefixLengths.get(index) || 0;
+    if (prefixLen >= full.length) return null;
+    const current = this.currentFragments.get(index) || "";
+    return { current, replacement: full.slice(prefixLen), prefixLen };
+  }
+
+  private prefixLengths = new Map<number, number>();
+  private currentFragments = new Map<number, string>();
+
+  /** Feed one chunk while tracking which part of a tool call's args was streamed now. */
+  pushTracked(chunk: any) {
+    const before = new Map<number, number>();
+    for (const [i, c] of this.state.calls) before.set(i, c.arguments.length);
+    this.push(chunk);
+    for (const choice of chunk?.choices || []) {
+      for (const tc of choice.delta?.tool_calls || []) {
+        const i = tc.index ?? 0;
+        const frag = typeof tc.function?.arguments === "string" ? tc.function.arguments : "";
+        this.currentFragments.set(i, frag);
+        this.prefixLengths.set(i, before.get(i) || 0);
+      }
+    }
+  }
+
+  /** Replace `"arguments":"<current>"` in raw SSE text with the rewritten fragment. */
+  static rewriteRawArguments(body: string, current: string, replacement: string): string {
+    if (!current) return body;
+    const from = `"arguments":${JSON.stringify(current)}`;
+    const to = `"arguments":${JSON.stringify(replacement)}`;
+    return body.includes(from) ? body.replace(from, to) : body;
+  }
 }

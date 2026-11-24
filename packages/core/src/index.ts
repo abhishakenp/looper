@@ -17,6 +17,7 @@ export * from "./workflows/liza.js";
 export * from "./workflows/channels.js";
 export * from "./workflows/toolcall.js";
 export * from "./wake.js";
+export * from "./workflows/subagent-smart.js";
 export * from "./workflows/ownership.js";
 export * from "./workflows/verify-gate.js";
 export * from "./durable-v2.js";
