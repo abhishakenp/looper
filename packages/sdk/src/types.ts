@@ -77,7 +77,7 @@ export interface LooperConfig {
   caTimeoutMs?: number;
   /** mitmproxy listen port when interceptMode is "regular". Default 8080. */
   proxyPort?: number;
-  /** "pid" = wrapped process only; "name" = also capture descendant processes. Default pid. */
+  /** "name" = wrapped process + descendants (default); "pid" = wrapped process only. */
   captureScope?: "pid" | "name";
   /** Extension context: per-extension config from `config.extensionsConfig[name]`. */
   config?: Record<string, unknown>;

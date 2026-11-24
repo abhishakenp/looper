@@ -85,7 +85,7 @@ export function normalizeConfig(input: Record<string, any>): LooperConfig {
     readyTimeoutMs: num(m.readyTimeoutMs, d.readyTimeoutMs, 0, 600_000),
     caTimeoutMs: num(m.caTimeoutMs, d.caTimeoutMs, 0, 60_000),
     proxyPort: num(m.proxyPort, d.proxyPort, 1, 65_535),
-    captureScope: oneOf(m.captureScope, ["pid", "name"] as const, "pid"),
+    captureScope: oneOf(m.captureScope, ["pid", "name"] as const, "name"),
     caCert: m.caCert === false ? false : str(m.caCert, ""),
     fanout: {
       enabled: bool(m.fanout?.enabled, false),
