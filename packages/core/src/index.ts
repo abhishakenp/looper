@@ -15,3 +15,5 @@ export * from "./workflows/detect.js";
 export * from "./workflows/inject.js";
 export * from "./workflows/liza.js";
 export * from "./workflows/channels.js";
+export * from "./workflows/adversarial.js";
+export * from "./workflows/liza-wrap.js";
