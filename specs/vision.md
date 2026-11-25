@@ -1,27 +1,49 @@
 # Goal: Harness-agnostic looper workflow augmentation
 
 ## Problem
-Coding harnesses (OpenCode, Codex, Claude Code, T3 Code, Liza agents) each implement subagent orchestration, context augmentation, and model routing differently. Reimplementing per-harness hooks is brittle and loses visibility. We need a transparent process-scope proxy that gives deterministic control over every LLM interaction without harness cooperation, while preserving prompt-cache economics (cache hits are ~10x cheaper).
+Coding harnesses (OpenCode, Codex, Claude Code, T3 Code, Pi, Liza agents) each implement subagent orchestration, context augmentation, and model routing differently. Reimplementing per-harness hooks is brittle and loses visibility. We need a transparent process-scope proxy that gives deterministic control over every LLM interaction without harness cooperation, while preserving prompt-cache economics (cache hits are ~10x cheaper).
 
 ## Users
 - The machine owner running any harness via `looper <harness> [...args]`.
 - Agent workflows (pixel, jev, liza, subagent fan-out) that need deterministic augmentation invisible to the LLM.
 
+## Product intent — the harness is driven by tools, not by LLM wandering
+The operator's explicit model: pixel (and peers) do the exploration, planning, task decomposition, and verification locally/deterministically; the LLM is used only for what it is good at — thinking through problems, generating code, producing arguments. Looper's job is to make that division real at the HTTP boundary:
+- **Attach pixel context to the request** so the LLM does not wander the codebase reading files it was already given verified evidence for. This is `request+response` augmentation: LLM sees the context, human sees the same context in the client.
+- **Fan out subagents deterministically from pixel planning/tasks** by augmenting the tool-call response boundary. The LLM does not decide how many workers or which files; pixel's plan does. Each subagent is launched recursively (by architecture) with its own independent, pre-injected pixel context, so workers focus on thinking, not re-discovery. Visibility is preserved because each child carries its own looper bridge into the shared control plane.
+- **Surface machine results to the human** in the client (`response-only`, `<looper-ui:*>` tag) when the LLM must NOT know about them — e.g. pixel's classification of an event, a verification gate verdict, a scheduler progress row. The harness echoes response text back, so looper strips `<looper-ui:*>` from the next request before hooks/LLM to keep the cache prefix intact.
+
+The choice of channel and content is made per augmentation by the extension author ("as needed"), not globally. Looper provides the primitive; examples declare the policy.
+
+## Liza way of working across harnesses (ACTIVE, not passive)
+Looper normally wraps Claude Code, Codex, OpenCode, Pi, ZCode, or any other harness. When a Liza workspace is present, looper **enforces the Liza way of working** rather than merely not breaking it:
+- Pairing contract text in the cached prefix is never rewritten.
+- Stage facts (current role-pair, approved artifacts, required reviewers) are read via `liza get --format json` / `liza validate --json` / `blackboard_state.py --json` and injected cache-safely.
+- Independent, file-owned subtasks for each stage are spun deterministically using the harness's own subagent tool calls, with pixel context pre-injected into every child — complete visibility, no LLM guess about fan-out shape.
+- Manual gates are driven by explicit `liza proceed <task-id> <transition>`; the blackboard is never edited directly.
+Because looper sees every HTTP boundary, it can enforce this far more reliably than a prompt-only contract.
+
 ## MVP scope
-- Process-scope capture with pid default + wrapped CLI shims for external subagents (visibility preserved, no recursion).
-- Two-channel augmentation: response-only (LLM never knows, cache untouched) and request+response (LLM needs context, prefix hash verified).
-- Deterministic detection of subagent tools from the tool description/parameter schema in the request body — no harness name branching.
-- Chunk-level SSE tool-call rewriting before the harness executes the call.
+- Process-scope capture: `pid` default (wrapped process + same-process child sessions), wrapped CLI shims for separately-spawned external subagents (shared control plane, no visibility loss).
+- Two-channel augmentation: `response-only` (LLM never knows, cache untouched), `request+response` (LLM needs context, prefix hash verified).
+- Deterministic detection of subagent tools from each tool's description + parameter schema in the request body — no harness-name branching.
+- Chunk-level SSE tool-call rewriting before the harness executes the call; pixel planning/tasks can fan out subagents deterministically here.
 - Durable control plane (pi-durable) with atomic 0600 snapshots and cross-process locking.
-- User-side extensions symlinked from `examples/` into `~/.looper/extensions`, hot-reloadable.
-- Liza compatibility: pairing contract preserved; blackboard driven only through CLI; stage chains deterministic.
-- Config layered 7 tiers; cache-safe by default; fail-open on every hook error.
+- User-side extensions symlinked from `examples/` into `~/.looper/extensions`, hot-reloadable; all named workflow examples ship and are active.
+- Liza enforcement as described above; pairing contract preserved; blackboard CLI-only; stage chains deterministic.
+- Config layered, cache-safe by default; fail-open.
 
 ## Out of scope
 - Linux/Windows capture validation (later).
-- Codex/Claude live quota/auth runs (later; architecture accepted).
+- Codex live quota runs (later; architecture accepted). Linux/Windows and Codex are best-effort, not MVP gates.
 - Reimplementing harness TUI or internal supervisor logic.
 - Writing directly to Liza's `.liza/state.yaml` (forbidden by contract).
+
+## Behavior rules
+- Cache-prefix hash check failure: **send the mutation anyway and log a warning** (operator decision 2026-11-25). Verification is advisory, not a hard stop; the cache-miss cost is accepted.
+- On any hook error otherwise: fail-open to pass, name the reason in the log.
+- Determinism has three concrete meanings: (1) subagent detection uses the tool schema, never a name list; (2) stage ordering comes from the frozen pipeline, never LLM memory; (3) augmentations are reproducible from state, not from conversation history.
+- Fail-open is the default on bridge/CLI timeouts.
 
 ## Success criteria (observable)
 - `bun test` passes; `tsc` clean for sdk/core/cli.
@@ -29,15 +51,17 @@ Coding harnesses (OpenCode, Codex, Claude Code, T3 Code, Liza agents) each imple
 - Real captured subagent tool calls accumulate and rewrite in-flight (trace shows mutate decision with injected context).
 - Provider cache ratio with cache-safe injection keeps cached_tokens unchanged vs baseline; cache-breaking control drops to 0.
 - Live hot reload of symlinked extensions into a running looper without restart.
-- `liza get tasks --format json` works on the looper workspace.
+- `liza get tasks --format json` works on the looper workspace; blackboard_op.py mutations verified.
+- MVP validation harnesses: **OpenCode, Pi (free OpenRouter model), Liza, and Claude with a cheap model (Haiku)**. Codex/Linux/Windows remain best-effort.
+- Named workflow examples ship symlinked and active.
 
 ## Risks / assumptions
 - mitmproxy local mode cannot spec a process tree; pid + wrapped shims is the mitigation.
-- Response-only injections are echoed by the harness into the next request; looper strips `<looper-ui:*>` before hooks/LLM.
+- The harness echoes response injections back into the next request; looper strips `<looper-ui:*>` before hooks/LLM.
 - Some clients ignore HTTP(S)_PROXY; regular mode is opt-in only.
-- Credits/quota can block live harness validation; OmniRoute free models are available for protocol proofs.
+- Quota/auth can block live harness validation; OmniRoute free models are available for protocol proofs.
+- Pixel is the primitive provider: where pixel lacks a primitive looper needs, we write a pixel plugin for it (operator direction).
 
-## Decisions already made
-- pid default, wrapped-shim for subagents (user decision).
-- Plugins symlinked from examples into ~/.looper/extensions (user decision).
-- Real Liza workspace in the looper repo for the plan (user decision).
+## Decisions already made (human, 2026-11-25)
+- pid default + wrapped shims; symlink all plugins from examples; real Liza workspace; both augmentation channels with per-extension choice; active Liza enforcement with deterministic recursive subagents; cache-hash failure sends mutation with warning; MVP validation set = OpenCode/Pi/Liza/Claude-haiku; examples ship active.
+- Full decision provenance: `specs/vision-decisions.md`.
