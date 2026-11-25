@@ -6,7 +6,13 @@
     "done": "tsc clean sdk/core/cli; bun test green; looper curl returns 577 bytes with zero console output",
     "scope": "packages/core, packages/cli, packages/bridge, packages/sdk",
     "role_pair": "architecture-pair",
-    "validation": ["bunx tsc -p packages/sdk/tsconfig.json", "bunx tsc -p packages/core/tsconfig.json", "bunx tsc -p packages/cli/tsconfig.json", "bun test"]
+    "validation": [
+      "bunx tsc -p packages/sdk/tsconfig.json",
+      "bunx tsc -p packages/core/tsconfig.json",
+      "bunx tsc -p packages/cli/tsconfig.json",
+      "bun test"
+    ],
+    "priority": 1
   },
   {
     "id": "cache-safe-augmentation",
@@ -15,8 +21,14 @@
     "done": "cached_tokens ratio with safe injection unchanged vs baseline; cache-breaking control drops to 0; <looper-ui:*> stripped from next request",
     "scope": "packages/core/src/workflows/channels.ts, packages/core/src/workflows/inject.ts, packages/core/src/hooks.ts",
     "role_pair": "coding-pair",
-    "depends": ["core-primitives"],
-    "validation": ["bun test", "looper node /tmp/omni-cache.mjs via cache test"]
+    "depends": [
+      "core-primitives"
+    ],
+    "validation": [
+      "bun test",
+      "looper node /tmp/omni-cache.mjs via cache test"
+    ],
+    "priority": 2
   },
   {
     "id": "subagent-augmentation",
@@ -25,8 +37,14 @@
     "done": "real captured subagent calls detected and rewritten in-flight; 8 tool calls with args; 30+ tests green",
     "scope": "packages/core/src/workflows/subagent-smart.ts, toolcall.ts, scheduler.ts, packages/core/src/wake.ts",
     "role_pair": "coding-pair",
-    "depends": ["cache-safe-augmentation"],
-    "validation": ["bun test", "live looper node forced subagent tool call trace shows mutate decision"]
+    "depends": [
+      "cache-safe-augmentation"
+    ],
+    "validation": [
+      "bun test",
+      "live looper node forced subagent tool call trace shows mutate decision"
+    ],
+    "priority": 3
   },
   {
     "id": "liza-integration",
@@ -35,8 +53,14 @@
     "done": "liza get tasks --format json works; blackboard_op.py mutations verified; stage gates fail-open",
     "scope": "packages/core/src/workflows/liza.ts, adversarial.ts, liza-wrap.ts",
     "role_pair": "architecture-pair",
-    "depends": ["core-primitives"],
-    "validation": ["bun test", "liza get tasks --format json -C /Users/abhi/proj/looper"]
+    "depends": [
+      "core-primitives"
+    ],
+    "validation": [
+      "bun test",
+      "liza get tasks --format json -C /Users/abhi/proj/looper"
+    ],
+    "priority": 4
   },
   {
     "id": "user-side-plugins",
@@ -45,8 +69,15 @@
     "done": "all plugin factories loadable; live session hot-reloads symlinked edits without restart; no manual copying",
     "scope": "examples/extensions, ~/.looper/extensions",
     "role_pair": "coding-pair",
-    "depends": ["subagent-augmentation", "liza-integration"],
-    "validation": ["bun test test/plugins.test.ts", "touch plugin -> live log shows reloading extensions"]
+    "depends": [
+      "subagent-augmentation",
+      "liza-integration"
+    ],
+    "validation": [
+      "bun test test/plugins.test.ts",
+      "touch plugin -> live log shows reloading extensions"
+    ],
+    "priority": 5
   },
   {
     "id": "final-verification",
@@ -55,7 +86,15 @@
     "done": "all acceptance criteria observed; final plan saved to ~/.plans and clipboard; Liza workspace green",
     "scope": "docs, ~/.plans, specs",
     "role_pair": "integration-pair",
-    "depends": ["user-side-plugins"],
-    "validation": ["bun test", "tsc", "looper curl e2e", "liza status"]
+    "depends": [
+      "user-side-plugins"
+    ],
+    "validation": [
+      "bun test",
+      "tsc",
+      "looper curl e2e",
+      "liza status"
+    ],
+    "priority": 6
   }
 ]
