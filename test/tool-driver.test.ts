@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { workPackagesFromPixel, buildAugmentations, toolsFromRequest } from "../packages/core/src/workflows/tool-driver.js";
+import { workPackagesFromPixel, buildAugmentations } from "../packages/core/src/workflows/tool-driver.js";
+import { toolsFromRequest } from "../packages/core/src/workflows/subagent-smart.js";
 
 const T3 = { tools: [{ type: "function", function: { name: "subagent", description: "Spawns an agent in a child session", parameters: { type: "object", properties: { agent: {}, description: {}, prompt: {}, model: {}, sessionID: {} } } } }] };
 const PI = { tools: [{ type: "function", function: { name: "subagent", description: "Delegate to isolated subagents", parameters: { type: "object", properties: { action: {}, agent: {}, task: {}, tasks: {}, chain: {}, dependsOn: {} } } } }] };
