@@ -80,3 +80,14 @@ Because looper sees every HTTP boundary, it can enforce this far more reliably t
 - N3: Liza enforcement core primitive lives in `core/workflows/liza.ts`; the `examples/extensions/liza-deterministic.ts` example is the active policy. Core owns mechanism, example owns policy.
 - N4: Harness list is illustrative, not exhaustive; the contract is "any harness that speaks HTTP to an LLM provider".
 - Pixel gaps to fill as pixel plugins when needed: `pixel-looper-hook`, `pixel-leases`, `pixel-rpc`, `pixel-handoff`, `pixel-approve`, `pixel-watchdog`, `pixel-taskpack`, `pixel-guard` (specs in `/tmp/pixel-capability-map.md` §4). These are NOT MVP blockers — looper implements the needed primitives in TypeScript until a pixel plugin exists.
+
+## Pixel-driven harness control (2026-11-25 addendum)
+The operator's explicit target architecture: **LLM does only what cannot be done deterministically; pixel and peers drive the harness.** Subagent spinning must be driven by pixel's planning/task decomposition, using the harness's OWN subagent tool call (so visibility through looper is complete), with zero harness-specific conditionals:
+
+- `core/workflows/subagent-smart.ts` — Jev/pixel classifies a tool's **description + parameter schema** from the request body; no name list, no branching. Verified on two very different real schemas: T3/OpenCode `subagent{agent,description,prompt,model,sessionID}` and Pi/pi-ultimate `subagent{action,agent,task,tasks,chain,dependsOn,needs,files,ownership}` — both resolved to `subagent` via semantics.
+- `core/workflows/tool-driver.ts` — `workPackagesFromPixel()` turns `pixel scope-task`/`pixel plan` output into deterministic file-owned work packages; `buildAugmentations()` maps them onto each harness tool's own dispatch shape (T3 → `prompt` string, Pi → `tasks[]`). Verified: same pixel output produced `prompt` vs `tasks[]` automatically from the schema.
+- Visibility: the harness executes its own tool call; looper sees the request, the SSE `delta.tool_calls`, the rewritten chunk, and every child HTTP flow through the shared control plane. 8 real native subagent calls with full args confirmed in trace.
+- Recursive-by-architecture: each subagent is launched through a wrapped shim / shared control plane (pid scope + `core/workflows/shim.ts`), so it carries pixel context into its own fresh conversation and focuses on thinking, not rediscovery.
+- LLM is called only for: reasoning/generation inside the harness and the tiny `pixel classify --jsonl` decision questions. Exploration, planning, tasking, file selection, verification, routing are pixel/local/deterministic.
+
+This is the design; per-harness tool schemas differ but the control logic does not — it reads the schema and lets pixel decide.
