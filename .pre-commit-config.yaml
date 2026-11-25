@@ -1,0 +1,15 @@
+# Minimal pre-commit config required by Liza init.
+# Looper's real gates are bun test + tsc (see specs/vision.md).
+repos:
+  - repo: local
+    hooks:
+      - id: typecheck
+        name: TypeScript build
+        entry: bash -c 'bunx tsc -p packages/sdk/tsconfig.json && bunx tsc -p packages/core/tsconfig.json && bunx tsc -p packages/cli/tsconfig.json'
+        language: system
+        pass_filenames: false
+      - id: tests
+        name: Bun tests
+        entry: bun test
+        language: system
+        pass_filenames: false
