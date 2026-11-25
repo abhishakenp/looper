@@ -119,6 +119,9 @@ const TERMINAL_STATUSES = new Set<FlowStatus>(["done", "error", "committed", "cr
 const emptySnapshot = (): DurableV2Snapshot => ({ version: 1, flows: {}, claims: {}, meta: {} });
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+/** Only keys touched by this operation may win over the on-disk snapshot. */
+type ChangedKeys = { flows?: string[]; claims?: string[]; meta?: string[] };
+
 const assignDefined = (target: Record<string, JsonValue>, patch: Record<string, JsonValue | undefined>): void => {
   for (const [key, value] of Object.entries(patch)) {
     if (value !== undefined) target[key] = value;
@@ -178,8 +181,30 @@ export class DurableControlPlane {
     }, context);
   }
 
-  private async persist(): Promise<void> {
-    await atomicWriteJson(this.file, this.data);
+  /**
+   * Re-read the snapshot while holding the cross-process lock, then merge only
+   * the keys this operation changed. Another live instance's keys survive,
+   * even when both processes hydrate from the same empty file.
+   */
+  private async persist(changed?: ChangedKeys): Promise<void> {
+    let merged: DurableV2Snapshot = this.data;
+    await atomicWriteJson(this.file, this.data, {
+      merge: (onDisk) => {
+        const disk = isSnapshot(onDisk) ? onDisk : emptySnapshot();
+        merged = { version: 1, flows: { ...disk.flows }, claims: { ...disk.claims }, meta: { ...disk.meta } };
+        for (const id of changed?.flows ?? Object.keys(this.data.flows)) {
+          if (this.data.flows[id]) merged.flows[id] = clone(this.data.flows[id]);
+        }
+        for (const id of changed?.claims ?? Object.keys(this.data.claims)) {
+          if (this.data.claims[id]) merged.claims[id] = clone(this.data.claims[id]);
+        }
+        for (const key of changed?.meta ?? Object.keys(this.data.meta)) {
+          if (key in this.data.meta) merged.meta[key] = clone(this.data.meta[key]);
+        }
+        return merged;
+      },
+    });
+    this.data = merged;
   }
 
   async init(): Promise<void> {
@@ -206,7 +231,7 @@ export class DurableControlPlane {
       await this.hydrate();
       const record = await this.commitFlow(flowId, patch);
       this.data.flows[record.id] = record;
-      await this.persist();
+      await this.persist({ flows: [record.id] });
       return record;
     });
   }
@@ -239,7 +264,7 @@ export class DurableControlPlane {
       await this.hydrate();
       const record = await this.commitClaim(claimId, patch);
       this.data.claims[record.id] = record;
-      await this.persist();
+      await this.persist({ claims: [record.id] });
       return record;
     });
   }
@@ -276,7 +301,7 @@ export class DurableControlPlane {
       }
       const meta = await this.session!.snapshot(MetaDoc, context);
       if (meta) this.data.meta = clone(meta.values);
-      await this.persist();
+      await this.persist({ flows: crashedFlows, meta: meta ? Object.keys(meta.values) : [] });
       return { crashedFlows };
     });
   }

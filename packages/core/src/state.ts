@@ -16,12 +16,123 @@ export function stateRoot(cwd: string): string {
   return path.join(root, projectStateKey(cwd));
 }
 
-/** Atomic 0600 write: temp file in the same dir, then rename. */
-export async function atomicWriteJson(file: string, value: unknown): Promise<void> {
+const DEFAULT_LOCK_TIMEOUT_MS = 10_000;
+const DEFAULT_LOCK_POLL_MS = 10;
+
+/** Per-call options win over LOOPER_FILE_LOCK_TIMEOUT_MS, which wins over the 10s default. */
+export function fileLockTimeoutMs(): number {
+  const raw = process.env.LOOPER_FILE_LOCK_TIMEOUT_MS;
+  const ms = raw === undefined ? Number.NaN : Number(raw);
+  return Number.isFinite(ms) && ms > 0 ? ms : DEFAULT_LOCK_TIMEOUT_MS;
+}
+
+export type FileLockOptions = {
+  /** Max wait to acquire, and the age past which an existing lock is stale. */
+  timeoutMs?: number;
+  pollMs?: number;
+};
+
+type LockOwner = { token: string; at: number };
+
+const readOwner = async (lockPath: string): Promise<LockOwner | undefined> => {
+  try {
+    const [pid, at, token] = (await fs.promises.readFile(lockPath, "utf8")).split(":");
+    const ts = Number(at);
+    return pid && token && Number.isFinite(ts) ? { token, at: ts } : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * O_EXCL cross-process lock. Recovery moves a stale lock aside with an atomic
+ * rename instead of unlinking it: an unlink could delete a lock another
+ * contender acquired between the staleness check and the recovery.
+ */
+export async function withFileLock<T>(
+  lockPath: string,
+  fn: () => Promise<T>,
+  options: FileLockOptions = {},
+): Promise<T> {
+  const timeoutMs = options.timeoutMs ?? fileLockTimeoutMs();
+  const pollMs = options.pollMs ?? DEFAULT_LOCK_POLL_MS;
+  const token = crypto.randomUUID();
+  const owner = `${process.pid}:${Date.now()}:${token}`;
+  const deadline = Date.now() + timeoutMs;
+  await fs.promises.mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+
+  const tryAcquire = async (): Promise<fs.promises.FileHandle | undefined> => {
+    let handle: fs.promises.FileHandle;
+    try {
+      handle = await fs.promises.open(lockPath, "wx", 0o600);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") return undefined;
+      throw err;
+    }
+    try {
+      await handle.writeFile(owner, "utf8");
+      return handle;
+    } catch (err) {
+      await handle.close().catch(() => {});
+      await fs.promises.unlink(lockPath).catch(() => {});
+      throw err;
+    }
+  };
+
+  let handle: fs.promises.FileHandle | undefined;
+  while (!handle) {
+    handle = await tryAcquire();
+    if (handle) break;
+    const current = await readOwner(lockPath);
+    if (current && Date.now() - current.at > timeoutMs) {
+      const stalePath = `${lockPath}.stale-${token}`;
+      try {
+        await fs.promises.rename(lockPath, stalePath);
+        await fs.promises.unlink(stalePath).catch(() => {});
+      } catch {
+        // Another contender recovered it first; the next loop sees its lock.
+      }
+    }
+    if (Date.now() >= deadline) throw new Error(`timed out acquiring lock ${lockPath}`);
+    await delay(pollMs);
+  }
+
+  try {
+    return await fn();
+  } finally {
+    try {
+      if ((await readOwner(lockPath))?.token === token) await fs.promises.unlink(lockPath);
+    } finally {
+      await handle.close();
+    }
+  }
+}
+
+export type AtomicWriteOptions = FileLockOptions & {
+  /** Re-read the on-disk value under the lock; the returned value is written. */
+  merge?: (onDisk: unknown) => unknown;
+};
+
+/** Atomic 0600 write under a cross-process lock, optional read-merge-write. */
+export async function atomicWriteJson(file: string, value: unknown, options: AtomicWriteOptions = {}): Promise<void> {
   await fs.promises.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-  await fs.promises.writeFile(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
-  await fs.promises.rename(tmp, file);
+  await withFileLock(`${file}.lock`, async () => {
+    let merged = value;
+    if (options.merge) {
+      let onDisk: unknown;
+      try {
+        onDisk = JSON.parse(await fs.promises.readFile(file, "utf8"));
+      } catch {
+        // Absent or corrupt file: merge from nothing.
+      }
+      merged = options.merge(onDisk);
+    }
+    const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+    await fs.promises.writeFile(tmp, JSON.stringify(merged, null, 2), { mode: 0o600 });
+    await fs.promises.rename(tmp, file);
+  }, { timeoutMs: options.timeoutMs, pollMs: options.pollMs });
 }
 
 export class DurableState {

@@ -67,6 +67,79 @@ test("reads come from the pi-durable session, not from the recovery file", async
   }
 });
 
+test("two live instances writing the same stateDir never overwrite each other", async () => {
+  const dir = tempDir();
+  try {
+    // Both hydrate cold from an empty file, then write concurrently.
+    fs.writeFileSync(path.join(dir, "durable-v2-snapshot.json"), JSON.stringify({ version: 1, flows: {}, claims: {}, meta: {} }));
+    const left = new DurableControlPlane(dir);
+    const right = new DurableControlPlane(dir);
+    await Promise.all([left.init(), right.init()]);
+
+    const write = async (cp: DurableControlPlane, id: string): Promise<void> => {
+      for (let i = 0; i < 20; i++) await cp.writeFlow(`${id}-${i}`, { status: "committed", chunkCount: i });
+    };
+    await Promise.all([write(left, "flow-A"), write(right, "flow-B")]);
+
+    const onDisk = JSON.parse(fs.readFileSync(left.file, "utf8")) as { flows: Record<string, unknown> };
+    for (let i = 0; i < 20; i++) {
+      expect(onDisk.flows[`flow-A-${i}`]).toMatchObject({ id: `flow-A-${i}`, chunkCount: i });
+      expect(onDisk.flows[`flow-B-${i}`]).toMatchObject({ id: `flow-B-${i}`, chunkCount: i });
+    }
+    expect(fs.readdirSync(dir).filter((f) => f.includes(".tmp-") || f.includes(".lock"))).toEqual([]);
+    await Promise.all([left.close(), right.close()]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("two separate bun processes writing the same stateDir preserve both ids", async () => {
+  const dir = tempDir();
+  const runner = path.join(dir, "runner.ts");
+  try {
+    fs.writeFileSync(runner, `
+import { DurableControlPlane } from ${JSON.stringify(path.resolve("packages/core/src/durable-v2.ts"))};
+const [id, stateDir] = process.argv.slice(2);
+const cp = new DurableControlPlane(stateDir);
+await cp.init();
+for (let i = 0; i < 20; i++) await cp.writeFlow(id + "-" + i, { status: "committed", chunkCount: i });
+await cp.close();
+`);
+    const child = (id: string): Promise<void> => new Promise((resolve, reject) => {
+      const proc = Bun.spawn(["bun", "run", runner, id, dir], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" });
+      void proc.exited.then((code) => code === 0 ? resolve() : reject(new Error(`child ${id} exited ${code}`)));
+    });
+    await Promise.all([child("flow-A"), child("flow-B")]);
+
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, "durable-v2-snapshot.json"), "utf8")) as { flows: Record<string, unknown> };
+    for (let i = 0; i < 20; i++) {
+      expect(onDisk.flows[`flow-A-${i}`]).toMatchObject({ id: `flow-A-${i}`, chunkCount: i });
+      expect(onDisk.flows[`flow-B-${i}`]).toMatchObject({ id: `flow-B-${i}`, chunkCount: i });
+    }
+    expect(fs.readdirSync(dir).filter((f) => f.includes(".tmp-") || f.includes(".lock"))).toEqual([]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stale file lock is recovered and the lock is released", async () => {
+  const dir = tempDir();
+  try {
+    const { atomicWriteJson, withFileLock } = await import("../packages/core/src/state.js");
+    const lockPath = path.join(dir, "extra.lock");
+    fs.writeFileSync(lockPath, `${process.pid}:${Date.now() - 60_000}:stale`);
+    await withFileLock(lockPath, async () => {}, { timeoutMs: 100, pollMs: 5 });
+    expect(fs.existsSync(lockPath)).toBe(false);
+
+    const file = path.join(dir, "value.json");
+    await atomicWriteJson(file, {}, { merge: (disk) => ({ ...(disk as object), a: 1, b: 2 }) });
+    await atomicWriteJson(file, {}, { merge: (disk) => ({ ...(disk as object), c: 3, d: 4 }) });
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({ a: 1, b: 2, c: 3, d: 4 });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("reconcile marks only non-terminal flows crashed, durably and idempotently", async () => {
   const dir = tempDir();
   try {
