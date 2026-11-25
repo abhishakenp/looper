@@ -5,3 +5,9 @@ dist/
 bun.lockb
 
 .pixel/
+
+# Liza runtime lock/owner files (not versioned state)
+.liza/**/*.lock
+.liza/**/*.lock.owner.json
+.liza/*.lock
+.liza/*.lock.owner.json
