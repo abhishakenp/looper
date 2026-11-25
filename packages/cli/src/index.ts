@@ -12,6 +12,24 @@ if (args.length === 0) {
   process.exit(1);
 }
 
+if (args[0] === "doctor") {
+  const { config, layers } = loadLooperConfig(process.cwd());
+  const out = {
+    captureScope: config.captureScope,
+    interceptMode: config.interceptMode,
+    proxyPort: config.proxyPort,
+    caCert: config.caCert,
+    readyTimeoutMs: config.readyTimeoutMs,
+    configLayers: layers.map(l => l.name),
+    extensions: (config.extensions || []),
+    note: config.captureScope === "pid"
+      ? "pid: wrapped process + same-process child sessions; external CLI subagents need wrapped shims"
+      : "name: all processes named after the harness (may include unrelated)",
+  };
+  console.log(JSON.stringify(out, null, 2));
+  process.exit(0);
+}
+
 if (args[0] === "trace") {
   const sub = args[1] || "tail";
   const traceDir = path.join(os.homedir(), ".looper", "traces");
