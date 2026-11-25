@@ -1,0 +1,61 @@
+[
+  {
+    "id": "core-primitives",
+    "desc": "Core proxy primitives: process-scope capture, hook dispatch, flow state, durable control plane, 7-tier config",
+    "spec": "specs/vision.md",
+    "done": "tsc clean sdk/core/cli; bun test green; looper curl returns 577 bytes with zero console output",
+    "scope": "packages/core, packages/cli, packages/bridge, packages/sdk",
+    "role_pair": "architecture-pair",
+    "validation": ["bunx tsc -p packages/sdk/tsconfig.json", "bunx tsc -p packages/core/tsconfig.json", "bunx tsc -p packages/cli/tsconfig.json", "bun test"]
+  },
+  {
+    "id": "cache-safe-augmentation",
+    "desc": "Two-channel cache-safe augmentation with UI-strip and cache verification",
+    "spec": "specs/vision.md",
+    "done": "cached_tokens ratio with safe injection unchanged vs baseline; cache-breaking control drops to 0; <looper-ui:*> stripped from next request",
+    "scope": "packages/core/src/workflows/channels.ts, packages/core/src/workflows/inject.ts, packages/core/src/hooks.ts",
+    "role_pair": "coding-pair",
+    "depends": ["core-primitives"],
+    "validation": ["bun test", "looper node /tmp/omni-cache.mjs via cache test"]
+  },
+  {
+    "id": "subagent-augmentation",
+    "desc": "Semantic subagent tool detection + chunk-level rewrite + scheduler fan-out + wake",
+    "spec": "specs/vision.md",
+    "done": "real captured subagent calls detected and rewritten in-flight; 8 tool calls with args; 30+ tests green",
+    "scope": "packages/core/src/workflows/subagent-smart.ts, toolcall.ts, scheduler.ts, packages/core/src/wake.ts",
+    "role_pair": "coding-pair",
+    "depends": ["cache-safe-augmentation"],
+    "validation": ["bun test", "live looper node forced subagent tool call trace shows mutate decision"]
+  },
+  {
+    "id": "liza-integration",
+    "desc": "Liza pairing preserved, blackboard CLI-only, stage chains deterministic, adversarial blackboard client",
+    "spec": "specs/vision.md",
+    "done": "liza get tasks --format json works; blackboard_op.py mutations verified; stage gates fail-open",
+    "scope": "packages/core/src/workflows/liza.ts, adversarial.ts, liza-wrap.ts",
+    "role_pair": "architecture-pair",
+    "depends": ["core-primitives"],
+    "validation": ["bun test", "liza get tasks --format json -C /Users/abhi/proj/looper"]
+  },
+  {
+    "id": "user-side-plugins",
+    "desc": "Activate all workflow plugins via symlinks from examples into ~/.looper/extensions",
+    "spec": "specs/vision.md",
+    "done": "all plugin factories loadable; live session hot-reloads symlinked edits without restart; no manual copying",
+    "scope": "examples/extensions, ~/.looper/extensions",
+    "role_pair": "coding-pair",
+    "depends": ["subagent-augmentation", "liza-integration"],
+    "validation": ["bun test test/plugins.test.ts", "touch plugin -> live log shows reloading extensions"]
+  },
+  {
+    "id": "final-verification",
+    "desc": "Full system verification with real harness traffic and final plan",
+    "spec": "specs/vision.md",
+    "done": "all acceptance criteria observed; final plan saved to ~/.plans and clipboard; Liza workspace green",
+    "scope": "docs, ~/.plans, specs",
+    "role_pair": "integration-pair",
+    "depends": ["user-side-plugins"],
+    "validation": ["bun test", "tsc", "looper curl e2e", "liza status"]
+  }
+]
