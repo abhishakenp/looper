@@ -65,3 +65,10 @@ Because looper sees every HTTP boundary, it can enforce this far more reliably t
 ## Decisions already made (human, 2026-11-25)
 - pid default + wrapped shims; symlink all plugins from examples; real Liza workspace; both augmentation channels with per-extension choice; active Liza enforcement with deterministic recursive subagents; cache-hash failure sends mutation with warning; MVP validation set = OpenCode/Pi/Liza/Claude-haiku; examples ship active.
 - Full decision provenance: `specs/vision-decisions.md`.
+
+## Notes (round-2 gate, travel with document)
+- N1: Pixel is the primitive provider; exact commands per capability are recorded in `/tmp/pixel-capability-map.md` (brief, scope-task, execution-brief, classify, review-gate, task-state, impact, what-changed, recall, metrics). `--metrics off` required for JSON parsing.
+- N2: `liza proceed` is emitted as an explicit command by looper's Liza extension at a manual gate, triggered by observing `phase == PLAN_APPROVED` (or equivalent) from `liza get`/`blackboard_state.py`.
+- N3: Liza enforcement core primitive lives in `core/workflows/liza.ts`; the `examples/extensions/liza-deterministic.ts` example is the active policy. Core owns mechanism, example owns policy.
+- N4: Harness list is illustrative, not exhaustive; the contract is "any harness that speaks HTTP to an LLM provider".
+- Pixel gaps to fill as pixel plugins when needed: `pixel-looper-hook`, `pixel-leases`, `pixel-rpc`, `pixel-handoff`, `pixel-approve`, `pixel-watchdog`, `pixel-taskpack`, `pixel-guard` (specs in `/tmp/pixel-capability-map.md` §4). These are NOT MVP blockers — looper implements the needed primitives in TypeScript until a pixel plugin exists.
