@@ -2,7 +2,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, LooperDurableRuntime, MemoStore, WakeBus, stateRoot, expandTilde, loadConfig as loadLooperConfig } from "@looper/core";
+import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, DurableControlPlane, MemoStore, WakeBus, stateRoot, expandTilde, loadConfig as loadLooperConfig } from "@looper/core";
 import { safeAppendContext } from "@looper/core";
 import type { BridgeInbound, Decision, HookFn, HookType } from "@looper/sdk";
 
@@ -82,13 +82,28 @@ function loadMarkdownDirs(): { agents: any[]; skills: any[]; prompts: any[] } {
 const resources = loadMarkdownDirs();
 const wakeBus = new WakeBus();
 
+// ExtensionContext is shared SDK surface. Attach the workflow helpers at runtime
+// so an extension can use them without a second copy of the type or a core edit.
+const coreHelpers = await import("@looper/core");
+
 const flows = new FlowStore();
 const stateDir = stateRoot(cwd);
 const durable = new DurableState(stateDir);
-const runtime = new LooperDurableRuntime(stateDir);
+const controlPlane = new DurableControlPlane(stateDir);
+await controlPlane.init();
+// The bridge used to write `flow:<id>:last` into a key/value snapshot. The
+// control plane owns those records as pi-durable docs, so translate the key
+// back into a flow id and merge the same fields into that doc.
+const flowSnapshots = {
+  setSnapshot: async (key: string, value: Record<string, unknown>) => {
+    const match = /^flow:(.*):last$/.exec(key);
+    if (!match) return;
+    await controlPlane.writeFlow(match[1], value as any);
+  },
+};
 const hooks = new HookRegistry(flows, durable);
 hooks.setLogger(log);
-const reconciled = await runtime.reconcile(sessionId);
+const reconciled = await controlPlane.reconcile(sessionId);
 if (reconciled.crashedFlows.length) log(`[looper] reconciled ${reconciled.crashedFlows.length} crashed flow(s)`);
 
 const redactKey = new RegExp((config.trace?.redactKeys || []).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") || "(?!x)x", "i");
@@ -154,7 +169,7 @@ const procCtx = {
 const server = new BridgeServer(socketPath, async (msg: BridgeInbound) => {
   const id = (msg as any).id as string | undefined;
   if (msg.t === "response" || msg.t === "error" || msg.t === "done") wakeBus.setBusy(false);
-  if (id) runtime.setSnapshot(`flow:${id}:last`, { t: msg.t, status: msg.t, ts: Date.now(), requestId: `req_${id}` }).catch(() => {});
+  if (id) flowSnapshots.setSnapshot(`flow:${id}:last`, { t: msg.t, status: msg.t, ts: Date.now(), requestId: `req_${id}` }).catch(() => {});
   trace({ ts: Date.now(), dir: "in", id, requestId: id ? `req_${id}` : undefined, msg });
   // Inject queued follow-ups at a request boundary, cache-safely.
   if (msg.t === "request") {
@@ -246,7 +261,21 @@ function makeCtx(file: string, disposers: Array<() => void>) {
     config: (config.extensionsConfig || {})[name.replace(/\.(ts|js|mjs)$/, "")] || {},
     resources,
     wake: wakeBus,
-  };
+    ownership: {
+      assertAllowedPath: coreHelpers.assertAllowedPath,
+      canonicalPath: coreHelpers.canonicalPath,
+      isCredentialPath: coreHelpers.isCredentialPath,
+      parseShellWrites: coreHelpers.parseShellWrites,
+      OwnershipBroker: coreHelpers.OwnershipBroker,
+    },
+    verify: {
+      preRunVerify: coreHelpers.preRunVerify,
+      spawnVerificationRunner: coreHelpers.spawnVerificationRunner,
+      VerificationGate: coreHelpers.VerificationGate,
+      DEFAULT_VERIFY_TIMEOUT_MS: coreHelpers.DEFAULT_VERIFY_TIMEOUT_MS,
+      DEFAULT_VERIFY_OUTPUT_CAP: coreHelpers.DEFAULT_VERIFY_OUTPUT_CAP,
+    },
+  } as any;
 }
 
 async function unloadFile(file: string) {
@@ -356,6 +385,7 @@ const cleanup = async () => {
   for (const file of [...extRegistry.keys()]) await unloadFile(file);
   try { server.failOpenClaims(); } catch {}
   try { await server.stop(); } catch {}
+  try { await controlPlane.close(); } catch {}
 };
 process.on("SIGINT", () => { cleanup().finally(() => process.exit(130)); });
 process.on("SIGTERM", () => { cleanup().finally(() => process.exit(143)); });
