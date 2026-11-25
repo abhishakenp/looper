@@ -24,3 +24,4 @@ export * from "./durable-v2.js";
 export * from "./workflows/adversarial.js";
 export * from "./workflows/liza-wrap.js";
 export * from "./workflows/shim.js";
+export * from "./workflows/tool-driver.js";
