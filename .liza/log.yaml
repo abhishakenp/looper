@@ -1,0 +1,34 @@
+- timestamp: 2026-11-25T06:41:31Z
+  agent: system
+  action: initialized
+  detail: Harness-agnostic looper workflow augmentation
+- timestamp: 2026-11-25T06:43:55.065134Z
+  agent: orchestrator-1
+  action: task_added
+  task: core-primitives
+  detail: 'Core proxy primitives: process-scope capture, hook dispatch, flow state, durable control plane, 7-tier config'
+- timestamp: 2026-11-25T06:43:55.077954Z
+  agent: orchestrator-1
+  action: task_added
+  task: cache-safe-augmentation
+  detail: Two-channel cache-safe augmentation with UI-strip and cache verification
+- timestamp: 2026-11-25T06:43:55.085124Z
+  agent: orchestrator-1
+  action: task_added
+  task: subagent-augmentation
+  detail: Semantic subagent tool detection + chunk-level rewrite + scheduler fan-out + wake
+- timestamp: 2026-11-25T06:43:55.093032Z
+  agent: orchestrator-1
+  action: task_added
+  task: liza-integration
+  detail: Liza pairing preserved, blackboard CLI-only, stage chains deterministic, adversarial blackboard client
+- timestamp: 2026-11-25T06:43:55.099993Z
+  agent: orchestrator-1
+  action: task_added
+  task: user-side-plugins
+  detail: Activate all workflow plugins via symlinks from examples into ~/.looper/extensions
+- timestamp: 2026-11-25T06:44:35.593224Z
+  agent: orchestrator-1
+  action: task_added
+  task: final-verification
+  detail: Full system verification with real harness traffic and final plan

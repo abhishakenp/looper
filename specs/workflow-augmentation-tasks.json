@@ -85,7 +85,7 @@
     "spec": "specs/vision.md",
     "done": "all acceptance criteria observed; final plan saved to ~/.plans and clipboard; Liza workspace green",
     "scope": "docs, ~/.plans, specs",
-    "role_pair": "integration-pair",
+    "role_pair": "coding-pair",
     "depends": [
       "user-side-plugins"
     ],

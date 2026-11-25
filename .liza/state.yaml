@@ -1,0 +1,196 @@
+version: 1
+pipeline_version: 3
+goal:
+    id: goal-1795588891
+    description: Harness-agnostic looper workflow augmentation
+    spec_ref: specs/vision.md
+    entry_point: general-objective
+    created: 2026-11-25T06:41:31.331627Z
+    status: IN_PROGRESS
+    alignment_history:
+        - timestamp: 2026-11-25T06:41:31.331627Z
+          event: initialization
+          summary: Initial goal. No tasks defined yet.
+        - timestamp: 2026-11-25T06:43:55.065134Z
+          event: planning
+          summary: 'Added task core-primitives: Core proxy primitives: process-scope capture, hook dispatch, flow state, durable control plane, 7-tier config'
+        - timestamp: 2026-11-25T06:43:55.077954Z
+          event: planning
+          summary: 'Added task cache-safe-augmentation: Two-channel cache-safe augmentation with UI-strip and cache verification'
+        - timestamp: 2026-11-25T06:43:55.085124Z
+          event: planning
+          summary: 'Added task subagent-augmentation: Semantic subagent tool detection + chunk-level rewrite + scheduler fan-out + wake'
+        - timestamp: 2026-11-25T06:43:55.093032Z
+          event: planning
+          summary: 'Added task liza-integration: Liza pairing preserved, blackboard CLI-only, stage chains deterministic, adversarial blackboard client'
+        - timestamp: 2026-11-25T06:43:55.099993Z
+          event: planning
+          summary: 'Added task user-side-plugins: Activate all workflow plugins via symlinks from examples into ~/.looper/extensions'
+        - timestamp: 2026-11-25T06:44:35.593224Z
+          event: planning
+          summary: 'Added task final-verification: Full system verification with real harness traffic and final plan'
+tasks:
+    - id: core-primitives
+      type: architecture
+      role_pair: architecture-pair
+      description: 'Core proxy primitives: process-scope capture, hook dispatch, flow state, durable control plane, 7-tier config'
+      status: DRAFT_ARCHITECTURE
+      priority: 1
+      spec_ref: specs/vision.md
+      done_when: tsc clean sdk/core/cli; bun test green; looper curl returns 577 bytes with zero console output
+      validation:
+        - bunx tsc -p packages/sdk/tsconfig.json
+        - bunx tsc -p packages/core/tsconfig.json
+        - bunx tsc -p packages/cli/tsconfig.json
+        - bun test
+      scope: packages/core, packages/cli, packages/bridge, packages/sdk
+      created: 2026-11-25T06:43:55.065134Z
+      history: []
+    - id: cache-safe-augmentation
+      type: coding
+      role_pair: coding-pair
+      description: Two-channel cache-safe augmentation with UI-strip and cache verification
+      status: DRAFT_CODE
+      priority: 2
+      spec_ref: specs/vision.md
+      done_when: cached_tokens ratio with safe injection unchanged vs baseline; cache-breaking control drops to 0; <looper-ui:*> stripped from next request
+      validation:
+        - bun test
+        - looper node /tmp/omni-cache.mjs via cache test
+      scope: packages/core/src/workflows/channels.ts, packages/core/src/workflows/inject.ts, packages/core/src/hooks.ts
+      depends_on:
+        - core-primitives
+      created: 2026-11-25T06:43:55.077954Z
+      history: []
+    - id: subagent-augmentation
+      type: coding
+      role_pair: coding-pair
+      description: Semantic subagent tool detection + chunk-level rewrite + scheduler fan-out + wake
+      status: DRAFT_CODE
+      priority: 3
+      spec_ref: specs/vision.md
+      done_when: real captured subagent calls detected and rewritten in-flight; 8 tool calls with args; 30+ tests green
+      validation:
+        - bun test
+        - live looper node forced subagent tool call trace shows mutate decision
+      scope: packages/core/src/workflows/subagent-smart.ts, toolcall.ts, scheduler.ts, packages/core/src/wake.ts
+      depends_on:
+        - cache-safe-augmentation
+      created: 2026-11-25T06:43:55.085124Z
+      history: []
+    - id: liza-integration
+      type: architecture
+      role_pair: architecture-pair
+      description: Liza pairing preserved, blackboard CLI-only, stage chains deterministic, adversarial blackboard client
+      status: DRAFT_ARCHITECTURE
+      priority: 4
+      spec_ref: specs/vision.md
+      done_when: liza get tasks --format json works; blackboard_op.py mutations verified; stage gates fail-open
+      validation:
+        - bun test
+        - liza get tasks --format json -C /Users/abhi/proj/looper
+      scope: packages/core/src/workflows/liza.ts, adversarial.ts, liza-wrap.ts
+      depends_on:
+        - core-primitives
+      created: 2026-11-25T06:43:55.093032Z
+      history: []
+    - id: user-side-plugins
+      type: coding
+      role_pair: coding-pair
+      description: Activate all workflow plugins via symlinks from examples into ~/.looper/extensions
+      status: DRAFT_CODE
+      priority: 5
+      spec_ref: specs/vision.md
+      done_when: all plugin factories loadable; live session hot-reloads symlinked edits without restart; no manual copying
+      validation:
+        - bun test test/plugins.test.ts
+        - touch plugin -> live log shows reloading extensions
+      scope: examples/extensions, ~/.looper/extensions
+      depends_on:
+        - subagent-augmentation
+        - liza-integration
+      created: 2026-11-25T06:43:55.099993Z
+      history: []
+    - id: final-verification
+      type: coding
+      role_pair: coding-pair
+      description: Full system verification with real harness traffic and final plan
+      status: DRAFT_CODE
+      priority: 6
+      spec_ref: specs/vision.md
+      done_when: all acceptance criteria observed; final plan saved to ~/.plans and clipboard; Liza workspace green
+      validation:
+        - bun test
+        - tsc
+        - looper curl e2e
+        - liza status
+      scope: docs, ~/.plans, specs
+      depends_on:
+        - user-side-plugins
+      created: 2026-11-25T06:44:35.593224Z
+      history: []
+agents:
+    orchestrator-1:
+        role: orchestrator
+        status: IDLE
+        generation: 0cf0b967eeb31cf4accb09a363836bd8
+        lease_expires: 2026-11-25T07:12:58.717603Z
+        heartbeat: 2026-11-25T06:42:59.680631Z
+        registered_at: 2026-11-25T06:42:52.144681Z
+        terminal: terminal-1
+        provider: claude
+        iterations_total: 0
+        context_percent: 0
+        pid: 37664
+discovered: []
+human_notes: []
+spec_changes: []
+anomalies: []
+sprint:
+    id: sprint-1
+    number: 1
+    goal_ref: goal-1795588891
+    scope:
+        planned:
+            - core-primitives
+            - cache-safe-augmentation
+            - subagent-augmentation
+            - liza-integration
+            - user-side-plugins
+            - final-verification
+        stretch: []
+    timeline:
+        started: 2026-11-25T06:41:31.331627Z
+        deadline: 0001-01-01T00:00:00Z
+    status: IN_PROGRESS
+    metrics:
+        tasks_done: 0
+        tasks_in_progress: 0
+        tasks_blocked: 0
+        iterations_total: 0
+        review_cycles_total: 0
+        review_verdict_approvals: 0
+        review_verdict_rejections: 0
+        review_verdict_count: 0
+        review_verdict_approval_rate_percent: 0
+        task_submitted_for_review_count: 0
+        task_outcome_approval_rate_percent: 0
+circuit_breaker:
+    last_check: 0001-01-01T00:00:00Z
+    status: OK
+    history: []
+config:
+    max_coder_iterations: 10
+    max_review_cycles: 5
+    max_global_integration_generations: 3
+    heartbeat_interval: 60
+    lease_duration: 1800
+    coder_poll_interval: 30
+    doer_max_wait: 18000
+    orchestrator_poll_interval: 60
+    orchestrator_max_wait: 18000
+    reviewer_poll_interval: 30
+    reviewer_max_wait: 18000
+    agent_progress_timeout: 1800
+    integration_branch: integration
+    mode: RUNNING
