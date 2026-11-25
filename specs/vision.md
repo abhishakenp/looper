@@ -66,6 +66,14 @@ Because looper sees every HTTP boundary, it can enforce this far more reliably t
 - pid default + wrapped shims; symlink all plugins from examples; real Liza workspace; both augmentation channels with per-extension choice; active Liza enforcement with deterministic recursive subagents; cache-hash failure sends mutation with warning; MVP validation set = OpenCode/Pi/Liza/Claude-haiku; examples ship active.
 - Full decision provenance: `specs/vision-decisions.md`.
 
+
+
+## Liza protocol usage (corrected 2026-11-25)
+- **Pairing mode** = contract loaded into any harness session (Claude/Codex/OpenCode/Pi/ZCode/T3). No Liza CLI/TUI required for ordinary pairing. Activated by `liza init --opencode` (contract symlink `AGENTS.md → ~/.liza/CORE.md`); note the global `~/.config/opencode/AGENTS.md` is non-Liza and retained.
+- **Adversarial pairing** = doer + reviewers in harness panes sharing a Markdown blackboard, driven by `/adversarial-pairing <role> <path>` inside the harness; helpers `blackboard_state.py`/`blackboard_op.py` own frontmatter under a lock. Liza CLI/TUI is NOT required for the sessions themselves; `liza launch wezterm|cmux adversarial-pairing` is optional pane-spawning convenience. This is the right vehicle for looper's workflow: deterministic stage gates, independent reviewers, no full MAS supervisor.
+- **Full MAS** (`liza agent`, `state.yaml`, `liza get/validate/proceed`) is a separate mode. Used here only to track the plan tasks in `~/.liza/` workspace; it is NOT the workflow protocol for harness sessions. The earlier `liza agent orchestrator` attempt was wrong-mode and is stopped.
+- Active workspace: `.liza/adversarial/looper-workflow-augmentation.md` (created via `blackboard_op.py create`, phase DRAFT), plus MAS tasks in `.liza/state.yaml` for plan tracking. The two are distinct: adversarial for execution protocol, MAS for backlog.
+
 ## Notes (round-2 gate, travel with document)
 - N1: Pixel is the primitive provider; exact commands per capability are recorded in `/tmp/pixel-capability-map.md` (brief, scope-task, execution-brief, classify, review-gate, task-state, impact, what-changed, recall, metrics). `--metrics off` required for JSON parsing.
 - N2: `liza proceed` is emitted as an explicit command by looper's Liza extension at a manual gate, triggered by observing `phase == PLAN_APPROVED` (or equivalent) from `liza get`/`blackboard_state.py`.
