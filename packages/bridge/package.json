@@ -1,0 +1,7 @@
+{
+  "name": "@looper/bridge",
+  "version": "0.0.1",
+  "description": "mitmproxy addon that bridges Looper proxy events to a unix socket",
+  "files": ["bridge.py"],
+  "repository": { "type": "git", "url": "git+https://github.com/abhishakenp/looper.git" }
+}

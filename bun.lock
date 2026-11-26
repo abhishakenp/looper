@@ -9,15 +9,20 @@
         "typescript": "^5.9.2",
       },
     },
+    "packages/bridge": {
+      "name": "@looper/bridge",
+      "version": "0.0.1",
+    },
     "packages/cli": {
       "name": "@looper/cli",
       "version": "0.0.1",
       "bin": {
-        "looper": "./dist/index.js",
+        "looper": "dist/index.js",
       },
       "dependencies": {
-        "@looper/core": "workspace:*",
-        "@looper/sdk": "workspace:*",
+        "@looper/bridge": "0.0.1",
+        "@looper/core": "0.0.1",
+        "@looper/sdk": "0.0.1",
       },
     },
     "packages/core": {
@@ -25,7 +30,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@earendil-works/pi-durable": "^1.6.0",
-        "@looper/sdk": "workspace:*",
+        "@looper/sdk": "0.0.1",
       },
     },
     "packages/sdk": {
@@ -89,6 +94,8 @@
     "@earendil-works/pi-telemetry": ["@earendil-works/pi-telemetry@1.6.0", "", {}, "sha512-MNL0TvtpgoSfX7mBLSVgzxTW6yvT8VLEpHvbWnZsIp92FtqVvx+4q9DxWZdX8KvcQqBs0GseAgVnLdVFinjN9Q=="],
 
     "@google/genai": ["@google/genai@2.32.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"], "hasInstallScript": true }, "sha512-60c79uXpR0a47bmGqDxbXEBuQUalNmwo5mx5kqb91jIW4FoqpsLSt86DeVhRhtH5+s/16Wqxt3sXzFQn2U1OHQ=="],
+
+    "@looper/bridge": ["@looper/bridge@workspace:packages/bridge"],
 
     "@looper/cli": ["@looper/cli@workspace:packages/cli"],
 

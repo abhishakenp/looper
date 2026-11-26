@@ -1,0 +1,11 @@
+id: cpm-1
+description: Coding plan for looper workflow augmentation
+spec_ref: specs/vision.md
+done_when: Coding plan with C1..C5 and plan_ref set, rca_required false
+validation:
+  - test -f specs/liza/code-plan.md
+scope: specs/liza/code-plan.md
+role_pair: code-planning-main-pair
+priority: 4
+depends_on:
+  - arm-1

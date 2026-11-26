@@ -1,0 +1,11 @@
+id: uw-1
+description: Write user stories from approved epics
+spec_ref: specs/vision.md
+done_when: Story docs for S1.1..S5.4 written and reviewed
+validation:
+  - test -f specs/liza/story-plan.md
+scope: specs/liza/story-plan.md
+role_pair: us-writing-pair
+priority: 2
+depends_on:
+  - epm-1

@@ -1,0 +1,9 @@
+id: epm-1
+description: Produce epic decomposition for looper workflow augmentation
+spec_ref: specs/vision.md
+done_when: Epic plan artifact written with EP-001..EP-005 and reviewed by 2 reviewers with diversity
+validation:
+  - test -f specs/liza/epic-plan.md
+scope: specs/liza/epic-plan.md
+role_pair: epic-planning-main-pair
+priority: 1

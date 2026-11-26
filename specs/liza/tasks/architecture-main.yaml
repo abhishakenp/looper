@@ -1,0 +1,11 @@
+id: arm-1
+description: Architecture plan for looper workflow augmentation
+spec_ref: specs/vision.md
+done_when: Architecture plan at specs/arch-plan/looper-workflow-augmentation/ with A1..A5 and arch_ref set
+validation:
+  - test -f specs/liza/architecture-plan.md
+scope: specs/liza/architecture-plan.md
+role_pair: architecture-main-pair
+priority: 3
+depends_on:
+  - uw-1

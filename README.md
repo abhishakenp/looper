@@ -16,14 +16,40 @@ Transparent process-scope proxy harness for any CLI agent harness.
 - Durable file-backed state, core-owned FlowState
 - `proc.spawn` for subprocess/subagent primitives
 
+## Install
+Requires Bun and `mitmdump` (mitmproxy 12.x) on PATH.
+
+```bash
+npm install -g @looper/cli
+# or
+bun add -g @looper/cli
+```
+
 ## Quick start
 ```bash
+looper <harness> [args...]        # wrap any CLI harness
+looper trace tail [file]          # stream the latest NDJSON trace
+looper trace show [file]          # print a trace
+```
+
+Example:
+```bash
+looper curl -sk https://example.com
+```
+
+From a source checkout:
+```bash
 bun install
-bunx tsc -p packages/sdk/tsconfig.json
-bunx tsc -p packages/core/tsconfig.json
-bunx tsc -p packages/cli/tsconfig.json
 bun packages/cli/src/index.ts curl -sk https://example.com
 ```
+
+## Packages
+| Package | Purpose |
+|---------|---------|
+| [`@looper/cli`](packages/cli/README.md) | `looper` binary, extension loader, trace commands |
+| [`@looper/core`](packages/core/README.md) | Bridge server, flow store, hooks, durable state, proxy workflows |
+| [`@looper/sdk`](packages/sdk/README.md) | Shared types, config defaults, `defineExtension` contract |
+| [`@looper/bridge`](packages/bridge/README.md) | mitmproxy addon; installed as a CLI dependency |
 
 ## Extension example
 ```ts

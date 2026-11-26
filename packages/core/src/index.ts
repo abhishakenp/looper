@@ -25,3 +25,4 @@ export * from "./workflows/adversarial.js";
 export * from "./workflows/liza-wrap.js";
 export * from "./workflows/shim.js";
 export * from "./workflows/tool-driver.js";
+export * from "./workflows/stage-driver.js";

@@ -29,105 +29,76 @@ goal:
         - timestamp: 2026-11-25T06:44:35.593224Z
           event: planning
           summary: 'Added task final-verification: Full system verification with real harness traffic and final plan'
+        - timestamp: 2026-11-26T12:25:52.898264Z
+          event: planning
+          summary: 'Added task epm-1: Produce epic decomposition for looper workflow augmentation'
+        - timestamp: 2026-11-26T12:25:52.983664Z
+          event: planning
+          summary: 'Added task uw-1: Write user stories from approved epics'
+        - timestamp: 2026-11-26T12:25:53.088119Z
+          event: planning
+          summary: 'Added task arm-1: Architecture plan for looper workflow augmentation'
+        - timestamp: 2026-11-26T12:25:53.205052Z
+          event: planning
+          summary: 'Added task cpm-1: Coding plan for looper workflow augmentation'
 tasks:
-    - id: core-primitives
-      type: architecture
-      role_pair: architecture-pair
-      description: 'Core proxy primitives: process-scope capture, hook dispatch, flow state, durable control plane, 7-tier config'
-      status: DRAFT_ARCHITECTURE
+    - id: epm-1
+      type: epic-planning
+      role_pair: epic-planning-main-pair
+      description: Produce epic decomposition for looper workflow augmentation
+      status: DRAFT_EPIC_PLAN_MAIN
       priority: 1
       spec_ref: specs/vision.md
-      done_when: tsc clean sdk/core/cli; bun test green; looper curl returns 577 bytes with zero console output
+      done_when: Epic plan artifact written with EP-001..EP-005 and reviewed by 2 reviewers with diversity
       validation:
-        - bunx tsc -p packages/sdk/tsconfig.json
-        - bunx tsc -p packages/core/tsconfig.json
-        - bunx tsc -p packages/cli/tsconfig.json
-        - bun test
-      scope: packages/core, packages/cli, packages/bridge, packages/sdk
-      created: 2026-11-25T06:43:55.065134Z
+        - test -f specs/liza/epic-plan.md
+      scope: specs/liza/epic-plan.md
+      created: 2026-11-26T12:25:52.898264Z
       history: []
-    - id: cache-safe-augmentation
-      type: coding
-      role_pair: coding-pair
-      description: Two-channel cache-safe augmentation with UI-strip and cache verification
-      status: DRAFT_CODE
+    - id: uw-1
+      type: us-writing
+      role_pair: us-writing-pair
+      description: Write user stories from approved epics
+      status: DRAFT_US
       priority: 2
       spec_ref: specs/vision.md
-      done_when: cached_tokens ratio with safe injection unchanged vs baseline; cache-breaking control drops to 0; <looper-ui:*> stripped from next request
+      done_when: Story docs for S1.1..S5.4 written and reviewed
       validation:
-        - bun test
-        - looper node /tmp/omni-cache.mjs via cache test
-      scope: packages/core/src/workflows/channels.ts, packages/core/src/workflows/inject.ts, packages/core/src/hooks.ts
+        - test -f specs/liza/story-plan.md
+      scope: specs/liza/story-plan.md
       depends_on:
-        - core-primitives
-      created: 2026-11-25T06:43:55.077954Z
+        - epm-1
+      created: 2026-11-26T12:25:52.983664Z
       history: []
-    - id: subagent-augmentation
-      type: coding
-      role_pair: coding-pair
-      description: Semantic subagent tool detection + chunk-level rewrite + scheduler fan-out + wake
-      status: DRAFT_CODE
+    - id: arm-1
+      type: architecture
+      role_pair: architecture-main-pair
+      description: Architecture plan for looper workflow augmentation
+      status: DRAFT_ARCHITECTURE_MAIN
       priority: 3
       spec_ref: specs/vision.md
-      done_when: real captured subagent calls detected and rewritten in-flight; 8 tool calls with args; 30+ tests green
+      done_when: Architecture plan at specs/arch-plan/looper-workflow-augmentation/ with A1..A5 and arch_ref set
       validation:
-        - bun test
-        - live looper node forced subagent tool call trace shows mutate decision
-      scope: packages/core/src/workflows/subagent-smart.ts, toolcall.ts, scheduler.ts, packages/core/src/wake.ts
+        - test -f specs/liza/architecture-plan.md
+      scope: specs/liza/architecture-plan.md
       depends_on:
-        - cache-safe-augmentation
-      created: 2026-11-25T06:43:55.085124Z
+        - uw-1
+      created: 2026-11-26T12:25:53.088119Z
       history: []
-    - id: liza-integration
-      type: architecture
-      role_pair: architecture-pair
-      description: Liza pairing preserved, blackboard CLI-only, stage chains deterministic, adversarial blackboard client
-      status: DRAFT_ARCHITECTURE
+    - id: cpm-1
+      type: planning
+      role_pair: code-planning-main-pair
+      description: Coding plan for looper workflow augmentation
+      status: DRAFT_CODING_PLAN_MAIN
       priority: 4
       spec_ref: specs/vision.md
-      done_when: liza get tasks --format json works; blackboard_op.py mutations verified; stage gates fail-open
+      done_when: Coding plan with C1..C5 and plan_ref set, rca_required false
       validation:
-        - bun test
-        - liza get tasks --format json -C /Users/abhi/proj/looper
-      scope: packages/core/src/workflows/liza.ts, adversarial.ts, liza-wrap.ts
+        - test -f specs/liza/code-plan.md
+      scope: specs/liza/code-plan.md
       depends_on:
-        - core-primitives
-      created: 2026-11-25T06:43:55.093032Z
-      history: []
-    - id: user-side-plugins
-      type: coding
-      role_pair: coding-pair
-      description: Activate all workflow plugins via symlinks from examples into ~/.looper/extensions
-      status: DRAFT_CODE
-      priority: 5
-      spec_ref: specs/vision.md
-      done_when: all plugin factories loadable; live session hot-reloads symlinked edits without restart; no manual copying
-      validation:
-        - bun test test/plugins.test.ts
-        - touch plugin -> live log shows reloading extensions
-      scope: examples/extensions, ~/.looper/extensions
-      depends_on:
-        - subagent-augmentation
-        - liza-integration
-      created: 2026-11-25T06:43:55.099993Z
-      history: []
-    - id: final-verification
-      type: coding
-      role_pair: coding-pair
-      description: Full system verification with real harness traffic and final plan
-      status: DRAFT_CODE
-      priority: 6
-      spec_ref: specs/vision.md
-      done_when: all acceptance criteria observed; final plan saved to ~/.plans and clipboard; Liza workspace green
-      validation:
-        - bun test
-        - tsc
-        - looper curl e2e
-        - liza status
-      scope: docs, ~/.plans, specs
-      depends_on:
-        - user-side-plugins
-      created: 2026-11-25T06:44:35.593224Z
+        - arm-1
+      created: 2026-11-26T12:25:53.205052Z
       history: []
 agents:
     orchestrator-1:
@@ -143,7 +114,25 @@ agents:
         context_percent: 0
         pid: 37664
 discovered: []
-human_notes: []
+human_notes:
+    - timestamp: 2026-11-26T12:24:53.797694Z
+      message: 'Task final-verification deleted (was DRAFT_CODE): rebuild as Liza stage-chain tasks'
+      for: all
+    - timestamp: 2026-11-26T12:25:05.661615Z
+      message: 'Task core-primitives deleted (was DRAFT_CODE): rebuild as Liza stage-chain tasks'
+      for: all
+    - timestamp: 2026-11-26T12:25:05.697456Z
+      message: 'Task cache-safe-augmentation deleted (was DRAFT_CODE): rebuild as Liza stage-chain tasks'
+      for: all
+    - timestamp: 2026-11-26T12:25:05.732156Z
+      message: 'Task subagent-augmentation deleted (was DRAFT_ARCHITECTURE): rebuild as Liza stage-chain tasks'
+      for: all
+    - timestamp: 2026-11-26T12:25:05.767638Z
+      message: 'Task liza-integration deleted (was DRAFT_CODE): rebuild as Liza stage-chain tasks'
+      for: all
+    - timestamp: 2026-11-26T12:25:05.800361Z
+      message: 'Task user-side-plugins deleted (was DRAFT_CODE): rebuild as Liza stage-chain tasks'
+      for: all
 spec_changes: []
 anomalies: []
 sprint:
@@ -152,12 +141,10 @@ sprint:
     goal_ref: goal-1795588891
     scope:
         planned:
-            - core-primitives
-            - cache-safe-augmentation
-            - subagent-augmentation
-            - liza-integration
-            - user-side-plugins
-            - final-verification
+            - epm-1
+            - uw-1
+            - arm-1
+            - cpm-1
         stretch: []
     timeline:
         started: 2026-11-25T06:41:31.331627Z

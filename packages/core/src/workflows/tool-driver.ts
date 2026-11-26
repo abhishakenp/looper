@@ -70,7 +70,7 @@ export function buildAugmentations(tool: ToolSignature, work: WorkPackage[]): Dr
   const props = tool.schema?.properties || {};
   const out: DriverDecision["augmentations"] = [];
   // Single dispatch field vs parallel/chain fields — decided by the schema, not a name.
-  if ("tasks" in props && work.length > 1) {
+  if ("tasks" in props) {
     out.push({ tool: tool.name, field: "tasks", value: work.map(w => ({
       agent: w.taskId, task: w.task, files: w.files, ownership: w.ownership, dependsOn: w.dependsOn,
     })) });
