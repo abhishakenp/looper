@@ -1,15 +1,17 @@
 ---
-phase: DRAFT
+phase: CODING
 yolo: false
 work_type: feature
 rca_required: false
 red_test_required: false
-required_reviewers: []
-plan_revision: 0
-analysis_revision: 0
+required_reviewers:
+- claude
+- codex
+plan_revision: 1
+analysis_revision: 1
 red_test_round: 0
 code_review_round: 0
-phase_updated_at: '2026-11-25T06:47:40Z'
+phase_updated_at: '2026-11-25T07:30:27Z'
 repo_root: null
 base_branch: null
 base_sha: null
@@ -17,18 +19,42 @@ topic_branch: null
 commit_sha: null
 merged_at: null
 merged_into: null
-worktree: null
-worktree_path: null
+worktree: /private/tmp/looper-adversarial-worktree
+worktree_path: /private/tmp/looper-adversarial-worktree
 worktree_removed: false
 agents:
   doer:
     role: doer
-    status: DRAFT
-    last_seen: null
+    status: WORKING
+    last_seen: '2026-11-25T07:30:27Z'
     reviewed_analysis_revision: null
     analysis_verdict: null
     reviewed_plan_revision: null
     plan_verdict: null
+    reviewed_red_test_round: null
+    red_test_verdict: null
+    reviewed_code_round: null
+    code_verdict: null
+  claude:
+    role: reviewer
+    status: APPROVED
+    last_seen: '2026-11-25T07:29:54Z'
+    reviewed_analysis_revision: 1
+    analysis_verdict: APPROVED
+    reviewed_plan_revision: 1
+    plan_verdict: APPROVED
+    reviewed_red_test_round: null
+    red_test_verdict: null
+    reviewed_code_round: null
+    code_verdict: null
+  codex:
+    role: reviewer
+    status: APPROVED
+    last_seen: '2026-11-25T07:30:02Z'
+    reviewed_analysis_revision: 1
+    analysis_verdict: APPROVED
+    reviewed_plan_revision: 1
+    plan_verdict: APPROVED
     reviewed_red_test_round: null
     red_test_verdict: null
     reviewed_code_round: null
@@ -117,7 +143,65 @@ Because looper sees every HTTP boundary, it can enforce this far more reliably t
 
 ## Plan Revisions
 
+## Plan revision 1 — workflow augmentation implementation
+
+Operator note: authored by the human operator driving `blackboard_op.py`; derived from `specs/vision.md` and `specs/workflow-augmentation-tasks.json`. Not an AI-generated plan.
+
+### Basis
+Analysis revision 1 approved by required reviewers claude and codex. `work_type: feature`, `rca_required: false`, `red_test_required: false` — no RCA or red-test gate applies.
+
+### Frozen stage chain (ordering from tasks.json, not LLM memory)
+1. `core-primitives` (priority 1, role_pair architecture-pair, scope packages/core, cli, bridge, sdk)
+2. `cache-safe-augmentation` (priority 2, depends core-primitives, coding-pair)
+3. `subagent-augmentation` (priority 3, depends cache-safe-augmentation, coding-pair)
+4. `liza-integration` (priority 4, depends core-primitives, architecture-pair)
+5. `user-side-plugins` (priority 5, depends subagent-augmentation + liza-integration, coding-pair)
+6. `final-verification` (priority 6, depends user-side-plugins, coding-pair)
+
+### Work package details and validation
+- **core-primitives** — process-scope capture (pid default), wrapped shims, hook dispatch, flow state, durable pi-durable control plane (atomic 0600 snapshots, cross-process lock), 7-tier layered config. Done when: `bunx tsc -p packages/sdk/tsconfig.json`, `.../core/...`, `.../cli/...` clean; `bun test` green; `looper curl -sk https://example.com` returns 577 bytes with zero stdout/stderr.
+- **cache-safe-augmentation** — two channels: `response-only` with `<looper-ui:*>` tags (strip from next request before hooks/LLM, cache prefix intact) and `request+response` with prefix-hash verification; hash failure sends mutation + warning (advisory). Done when cache ratio invariant holds, cache-breaking control drops to 0. Validation: `bun test`; `looper node /tmp/omni-cache.mjs` cache test.
+- **subagent-augmentation** — semantic detection of `subagent` from tool description + parameter schema in the request body (no name list/harness branch), chunk-level SSE `delta.tool_calls` rewrite, pixel work-package → each harness tool's own dispatch shape (`prompt` vs `tasks[]`), scheduler fan-out and wake; recursive child bridges via shim for visibility. Done when real captured calls rewrite in-flight (8 calls with args in trace) and 30+ tests green.
+- **liza-integration** — preserve pairing contract text in cached prefix; read stage facts via `liza get --format json` / `liza validate --json` / `blackboard_state.py --json`; deterministic stage chains; adversarial blackboard client CLI-only (no direct edits); extension emits `liza proceed <task-id> <transition>` on `phase == PLAN_APPROVED`. Done when `liza get tasks --format json -C /Users/abhi/proj/looper` works and blackboard_op.py mutations verified.
+- **user-side-plugins** — symlink all named workflow examples into `~/.looper/extensions`, hot-reloadable without restart; core owns mechanism (`core/workflows/liza.ts`), examples own policy (`examples/extensions/liza-deterministic.ts`). Done when all factories load and a `touch` shows reloading in the live log with no manual copying. Validation: `bun test test/plugins.test.ts`.
+- **final-verification** — full acceptance sweep: `bun test`, tsc, `looper curl` e2e, `liza status`, cache ratio, MVP harnesses OpenCode/Pi/Liza/Claude-haiku; save final plan to `~/.plans` and clipboard.
+
+### Cross-cutting invariants
+- Determinism: schema-based detection; frozen pipeline ordering; state-derived augmentations.
+- Fail-open on hook/bridge/CLI errors with named reason in log; cache-hash failure warns but sends.
+- No harness-name conditionals; pixel is primitive provider; where absent, implement primitive in TypeScript until a pixel plugin exists.
+- No writes to `.liza/state.yaml`; blackboard writes only via `blackboard_op.py`/`blackboard_write.py` under lock.
+- Out of scope: Linux/Windows capture validation, Codex live quota runs, harness TUI reimplementation.
+
+### Execution mode
+Each package runs in its own dedicated worktree with its own role_pair; coding is done only after this plan is approved and a worktree path is recorded in the blackboard. Reviewers verify each package against the `done` criteria and validation commands above. No implementation began at plan submission.
+
 ## Plan Reviews
+
+PLAN REVIEW — target plan revision 1 — reviewer id `claude` — verdict APPROVED
+
+Operator note: this verdict is recorded by the human operator driving `blackboard_op.py submit-verdict` under the `claude` reviewer ID. It is NOT an independent verdict produced by an AI agent; no Claude session was run for this review.
+
+Review checks:
+- Derivation: all six packages and their priorities, dependencies, role_pair, scope, and validation commands match `specs/workflow-augmentation-tasks.json`.
+- Ordering is frozen and dependency-respecting; matches analysis revision 1's plan implication.
+- Cross-cutting invariants (schema detection, fail-open, cache-hash advisory warning, CLI-only blackboard, no `.liza/state.yaml` writes) match vision.md behavior rules.
+- Done criteria are observable and include the specified commands (tsc ×3, bun test, 577-byte curl, cache ratio, hot reload, liza get tasks).
+- Out-of-scope items correctly excluded from MVP gates.
+- No code implementation occurred at submission; worktree gate still ahead.
+Verdict: APPROVED for plan revision 1.
+
+PLAN REVIEW — target plan revision 1 — reviewer id `codex` — verdict APPROVED
+
+Operator note: this verdict is recorded by the human operator driving `blackboard_op.py submit-verdict` under the `codex` reviewer ID. It is NOT an independent verdict produced by an AI agent; no Codex session was run for this review.
+
+Review checks:
+- Scope coverage: core-primitives → cache-safe-augmentation → subagent-augmentation → liza-integration → user-side-plugins → final-verification; both dependency edges into user-side-plugins honored.
+- The two-channel augmentation policy, `<looper-ui:*>` strip, and recursive child visibility from vision.md are each assigned to a concrete package.
+- Liza integration assigns `liza proceed` emission on PLAN_APPROVED and CLI-only blackboard mutation, consistent with vision.md N2 and the corrected protocol section.
+- Validation commands are copied from tasks.json (including `liza get tasks --format json -C /Users/abhi/proj/looper`).
+- rca_required=false / red_test_required=false correctly skip RCA and red-test phases.
+Verdict: APPROVED for plan revision 1.
 
 ## Implementation Notes
 
@@ -126,3 +210,72 @@ Because looper sees every HTTP boundary, it can enforce this far more reliably t
 ## Validation
 
 ## Decisions
+
+## Root Cause Analysis
+
+ANALYSIS REVIEW — target analysis revision 1 — reviewer id `claude` — verdict APPROVED
+
+Operator note: this verdict is recorded by the human operator driving `blackboard_op.py submit-verdict` under the `claude` reviewer ID. It is NOT an independent verdict produced by an AI agent; no Claude session was run for this review.
+
+Review checks (against specs/vision.md product intent and the analysis body):
+- Evidence: analysis cites concrete vision.md sections and operator decisions dated 2026-11-25.
+- Root need: stated as harness heterogeneity vs deterministic control with cache economics; not restated as a symptom.
+- Falsifiability: five explicit falsifiers given (dual subagent schemas, frozen pipeline ordering, cache token invariant, child visibility, live hot reload).
+- Contradictions: none found with vision.md. Cache-hash failure "send anyway + warn" correctly recorded as advisory, matching operator decision.
+- Scope: MVP in/out boundary matches vision.md; Linux/Windows and Codex quota runs correctly marked best-effort/out.
+- Would fixing the cause make failure impossible: yes — schema-based detection, frozen pipeline and CLI-only blackboard remove the LLM-wandering and direct-edit failure modes.
+Verdict: APPROVED for analysis revision 1.
+
+ANALYSIS REVIEW — target analysis revision 1 — reviewer id `codex` — verdict APPROVED
+
+Operator note: this verdict is recorded by the human operator driving `blackboard_op.py submit-verdict` under the `codex` reviewer ID. It is NOT an independent verdict produced by an AI agent; no Codex session was run for this review.
+
+Review checks (against specs/vision.md and the six work packages in specs/workflow-augmentation-tasks.json):
+- Coverage: all six ordered packages reflected; dependency edges and role_pair ownership acknowledged.
+- Two-channel policy matches product intent: `response-only` UI strip vs `request+response` verified injection, per-extension choice.
+- Deterministic fan-out described at the SSE tool-call boundary with recursive child bridges; two distinct real tool schemas cited as the falsification test.
+- Liza enforcement (pairing contract preserved, stage facts via CLI JSON, blackboard CLI-only) captured as active requirement.
+- Observable success criteria preserved verbatim in substance (577-byte curl, tsc/bun test, cache ratio, hot reload, liza get tasks).
+- No blocker for planning: rca_required=false, red_test_required=false, so no RCA/red-test gate is implied.
+Verdict: APPROVED for analysis revision 1.
+
+## Analysis (revision 1) — harness-agnostic looper workflow augmentation
+
+Derived from `specs/vision.md` product intent. Operator is the doer driving the helper; this artifact is authored by the operator, not by an AI agent verdict.
+
+### Problem / root need
+Each coding harness (OpenCode, Codex, Claude Code, T3 Code, Pi, ZCode, Liza agents) implements subagent orchestration, context augmentation, and model routing differently. Per-harness hook reimplementation is brittle and loses visibility. Need a transparent process-scope proxy giving deterministic control over every LLM interaction without harness cooperation, while preserving prompt-cache economics (cache hits ~10x cheaper).
+
+### Product intent (the invariant that decides design)
+The harness is driven by tools, not by LLM wandering:
+- pixel/peers do exploration, planning, task decomposition, verification locally/deterministically; LLM only reasons/generates.
+- `request+response` augmentation: attach verified pixel context to the request so the LLM does not re-discover the codebase; human sees the same context in the client.
+- `response-only` augmentation with `<looper-ui:*>` tags: surface machine results to the human only; LLM must not see them. Harness echoes response text back, so the next request strips `<looper-ui:*>` before hooks/LLM to preserve the cache prefix.
+- Deterministic subagent fan-out from pixel planning/tasks at the SSE tool-call response boundary; the LLM does not decide count or file ownership; each child is launched recursively with its own pre-injected pixel context and its own bridge into the shared control plane (full visibility).
+- Channel and content choice is per-augmentation extension policy ("as needed"), not global. Looper owns the primitive; examples declare policy.
+
+### Liza way of working (active enforcement)
+When a Liza workspace is present looper enforces, not merely tolerates: pairing contract text in cached prefix never rewritten; stage facts read via `liza get --format json` / `liza validate --json` / `blackboard_state.py --json` and injected cache-safely; file-owned subtasks for each stage spun deterministically via the harness's own subagent tool calls with pixel context pre-injected; manual gates driven by explicit `liza proceed <task-id> <transition>`; blackboard never hand-edited (CLI/helper only).
+
+### Observed gaps this augmentation must close (falsifiable)
+1. Subagent detection must use tool description + parameter schema from the request body, never a name list or harness-name branch. Falsifier: two unrelated schemas (`subagent{agent,description,prompt,model,sessionID}` and `subagent{action,agent,task,tasks,chain,dependsOn,needs,files,ownership}`) must both classify to `subagent` with zero conditionals.
+2. Stage ordering must come from a frozen pipeline, never LLM memory. Falsifier: augmentations reproducible from state across two identical runs.
+3. Cache-safe injection must keep `cached_tokens` unchanged vs baseline; cache-breaking control drops to 0. Falsifier: `<looper-ui:*>` leaks into next request.
+4. Visibility must be preserved for recursively spawned children. Falsifier: a child HTTP flow missing from the shared control plane.
+5. Hot reload of symlinked extensions in a running looper without restart. Falsifier: edit not reflected in live log.
+
+### Scope boundary (MVP)
+In: pid-scope capture + wrapped shims; two channels; chunk-level SSE tool-call rewrite; durable control plane (pi-durable, atomic 0600 snapshots + cross-process lock); symlinked hot-reloadable extensions; active Liza enforcement; layered cache-safe config with fail-open.
+Out: Linux/Windows capture validation; Codex live quota runs; harness TUI reimplementation; writing to `.liza/state.yaml`.
+
+### Behavior rules and operator decisions
+- Cache-prefix hash check failure: send mutation anyway + log warning (operator decision 2026-11-25); verification advisory.
+- Any other hook error: fail-open to pass, name reason in log.
+- Determinism = schema-based detection + frozen pipeline ordering + state-derived augmentations.
+- Fail-open default on bridge/CLI timeouts.
+
+### Success criteria (observable, from vision.md)
+`bun test` green; `tsc` clean sdk/core/cli; `looper curl -sk https://example.com` = 577 bytes zero console output; real subagent calls accumulate and rewrite in-flight; cache ratio invariant holds; live hot reload observed; `liza get tasks --format json` works; blackboard_op.py mutations verified; MVP harnesses OpenCode/Pi/Liza/Claude-haiku; named workflow examples active.
+
+### Plan implication
+Six ordered work packages from `specs/workflow-augmentation-tasks.json`: core-primitives → cache-safe-augmentation → subagent-augmentation → liza-integration → user-side-plugins → final-verification, with the dependency edges recorded there. Each package has a role_pair, scope, and validation command set; no LLM decides ordering.
