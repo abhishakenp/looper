@@ -58,6 +58,24 @@ export default function ({ on, log }: any) {
 }
 ```
 
+## Releasing
+All four packages use one shared version. To publish:
+
+```bash
+# bump "version" in all four packages/*/package.json
+# and keep looper-* dependency specs at the same version
+bun install
+git commit -am "chore(release): vX.Y.Z"
+git tag vX.Y.Z
+git push && git push --tags
+```
+
+The `Publish to npm` workflow (`.github/workflows/publish.yml`) verifies that every
+package version and `looper-*` dependency matches the tag, runs the TypeScript build
+and `bun test`, then publishes `looper-sdk`, `looper-core`, `looper-bridge`,
+`looper-cli` in that order. It needs an Actions secret `NPM_TOKEN` with publish
+access to npm.
+
 ## Status
 v1 core implemented and hardened:
 - P1 CA trust/env injection for child processes (NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE, GIT_SSL_CAINFO, AWS_CA_BUNDLE, DENO_CERT).

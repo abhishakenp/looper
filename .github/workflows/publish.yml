@@ -1,0 +1,62 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Verify tag matches package versions
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for p in sdk core bridge cli; do
+            PKG_VERSION=$(node -p "require('./packages/$p/package.json').version")
+            if [ "$PKG_VERSION" != "$VERSION" ]; then
+              echo "::error::packages/$p is $PKG_VERSION but tag is $VERSION"
+              exit 1
+            fi
+            for dep in sdk core bridge cli; do
+              SPEC=$(node -p "require('./packages/$p/package.json').dependencies?.['looper-$dep'] || ''")
+              if [ -n "$SPEC" ] && [ "$SPEC" != "$VERSION" ]; then
+                echo "::error::packages/$p depends on looper-$dep@$SPEC but tag is $VERSION"
+                exit 1
+              fi
+            done
+          done
+          echo "Verified all packages at $VERSION"
+
+      - name: Build and test
+        run: |
+          bunx tsc -p packages/sdk/tsconfig.json
+          bunx tsc -p packages/core/tsconfig.json
+          bunx tsc -p packages/cli/tsconfig.json
+          bun test
+
+      - name: Publish packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for p in sdk core bridge cli; do
+            echo "Publishing looper-$p@${GITHUB_REF_NAME#v}"
+            npm publish --access public ./packages/$p
+          done
