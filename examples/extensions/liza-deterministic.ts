@@ -15,7 +15,7 @@ import {
   stageComplete,
   MANUAL_TRANSITIONS,
   proceedCommand,
-} from "/Users/abhi/proj/looper/packages/core/dist/index.js";
+} from "looper-core";
 
 export const ENTRY_POINTS = ["general-objective", "functional-spec", "detailed-spec", "technical-spec"] as const;
 

@@ -17,7 +17,7 @@
  * There is no response body on a request hook, so "request+response" here is
  * implemented as a pair of hooks with a shared key — not as one augment call.
  */
-import { parseBody, augment } from "/Users/abhi/proj/looper/packages/core/dist/index.js";
+import { parseBody, augment } from "looper-core";
 
 export const PIXEL_KEY = "pixel-result";
 export const TASK_CONTEXT_KEY = "task-context";

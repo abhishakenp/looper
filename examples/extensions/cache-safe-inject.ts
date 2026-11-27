@@ -2,7 +2,7 @@
  * Cache-safe context injection — append a constant block AFTER the cached prefix.
  * Copy into ~/.looper/extensions/ to enable. See safeAppendContext for guarantees.
  */
-import { parseBody, safeAppendContext } from "../../packages/core/dist/index.js";
+import { parseBody, safeAppendContext } from "looper-core";
 
 export default function ({ on, log, state }: any) {
   const seen = {

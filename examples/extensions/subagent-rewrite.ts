@@ -2,7 +2,7 @@
  * Live chunk-level subagent call rewrite. Injects deterministic context into
  * the subagent tool's arguments before the harness executes it.
  */
-import { ToolCallAccumulator } from "../../packages/core/dist/index.js";
+import { ToolCallAccumulator } from "looper-core";
 
 const G = globalThis as any;
 G.__looper_acc = G.__looper_acc || new Map();

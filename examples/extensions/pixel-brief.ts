@@ -15,7 +15,7 @@
  *  - ctx.memo dedupes the verdict by an exact hash of the judged text. Failures
  *    are never memoised by the core MemoStore.
  */
-import { parseBody, DecideClient, augment } from "/Users/abhi/proj/looper/packages/core/dist/index.js";
+import { parseBody, DecideClient, augment } from "looper-core";
 
 export const VERDICT_KEY = "pixel-brief-verdict";
 export const BRIEF_KEY = "pixel-brief-context";

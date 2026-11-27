@@ -16,7 +16,7 @@ import {
   type JobSettled,
   type LooperSubtask,
   type SubtaskResult,
-} from "/Users/abhi/proj/looper/packages/core/dist/index.js";
+} from "looper-core";
 
 /** Pure: a linear dependency chain from task ids. First task has no deps. */
 export function buildStageChain(ids: readonly string[], overrides: Partial<LooperSubtask> = {}): LooperSubtask[] {

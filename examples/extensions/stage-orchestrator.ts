@@ -3,8 +3,8 @@
  * Pixel builds the stage plan; LLM is asked only for bounded shapes it must produce;
  * each stage runs in a fresh-context subagent via the harness's own tool.
  */
-import { buildStagePlan, stageSubagentArgs } from "/Users/abhi/proj/looper/packages/core/dist/index.js";
-import { parseBody } from "/Users/abhi/proj/looper/packages/core/dist/index.js";
+import { buildStagePlan, stageSubagentArgs } from "looper-core";
+import { parseBody } from "looper-core";
 
 let plan: any = null;
 export default function ({ on, log, state, wake, effect, config }: any) {

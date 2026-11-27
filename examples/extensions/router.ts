@@ -11,7 +11,7 @@
  * are memoised by an exact hash of the judged text, not by a constant key.
  * Every hook is fail-open.
  */
-import { RouteHealth, DecideClient, parseBody } from "/Users/abhi/proj/looper/packages/core/dist/index.js";
+import { RouteHealth, DecideClient, parseBody } from "looper-core";
 
 /** FNV-1a: stable, short memo key. */
 export function verdictKey(text: string): string {

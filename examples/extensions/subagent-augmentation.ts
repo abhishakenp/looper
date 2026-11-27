@@ -31,7 +31,7 @@ import {
   type JobSettled,
   type LooperSubtask,
   type SubtaskResult,
-} from "/Users/abhi/proj/looper/packages/core/dist/index.js";
+} from "looper-core";
 
 export const CONTEXT_KEY = "subagent-context";
 export const RESULT_KEY = "subagent-result";

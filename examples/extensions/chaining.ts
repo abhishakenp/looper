@@ -11,7 +11,7 @@
  * boundary this project knows about, and verifies the prefix hash before it
  * returns. A key in ctx.state makes the injection once-per-conversation.
  */
-import { parseBody, safeAppendContext } from "/Users/abhi/proj/looper/packages/core/dist/index.js";
+import { parseBody, safeAppendContext } from "looper-core";
 
 export const CHAINING_KEY = "chaining-guidance";
 export const DEFAULT_STEPS = ["plan", "implement", "verify", "report"] as const;
