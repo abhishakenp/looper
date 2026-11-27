@@ -11,3 +11,6 @@ bun.lockb
 .liza/**/*.lock.owner.json
 .liza/*.lock
 .liza/*.lock.owner.json
+
+# Liza runtime agent prompts and state (runtime, not versioned)
+.liza/agent-prompts/
