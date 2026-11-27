@@ -1,7 +1,7 @@
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
-import type { BridgeInbound, BridgeOutbound, Decision, FlowId } from "@looper/sdk";
+import type { BridgeInbound, BridgeOutbound, Decision, FlowId } from "looper-sdk";
 
 export type HookHandler = (msg: BridgeInbound) => Promise<Decision> | Decision;
 

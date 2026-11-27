@@ -1,4 +1,4 @@
-import type { FlowId, FlowMeta } from "@looper/sdk";
+import type { FlowId, FlowMeta } from "looper-sdk";
 
 export interface FlowState {
   id: FlowId;

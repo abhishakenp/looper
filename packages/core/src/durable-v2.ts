@@ -1,6 +1,6 @@
 import { createSession, defineDoc, defineDocFamily, MemoryStorage } from "@earendil-works/pi-durable";
 import type { JsonObject, Session } from "@earendil-works/pi-durable";
-import type { FlowId } from "@looper/sdk";
+import type { FlowId } from "looper-sdk";
 import fs from "node:fs";
 import path from "node:path";
 import { atomicWriteJson } from "./state.js";

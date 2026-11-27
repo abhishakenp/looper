@@ -2,9 +2,10 @@
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, DurableControlPlane, MemoStore, WakeBus, stateRoot, expandTilde, loadConfig as loadLooperConfig } from "@looper/core";
-import { safeAppendContext } from "@looper/core";
-import type { BridgeInbound, Decision, HookFn, HookType } from "@looper/sdk";
+import { createRequire } from "node:module";
+import { BridgeServer, FlowStore, HookRegistry, spawnProxied, resolveHarnessBinary, DurableState, DurableControlPlane, MemoStore, WakeBus, stateRoot, expandTilde, loadConfig as loadLooperConfig } from "looper-core";
+import { safeAppendContext } from "looper-core";
+import type { BridgeInbound, Decision, HookFn, HookType } from "looper-sdk";
 
 const args = process.argv.slice(2);
 if (args.length === 0) {
@@ -53,7 +54,8 @@ const runDir = path.join(os.homedir(), ".looper", "run");
 // Layered, normalized config (7 tiers; project layers trust-gated) — before paths.
 const { config, layers, projectTrusted } = loadLooperConfig(cwd);
 const socketPath = config.bridgeSocket ? expandTilde(config.bridgeSocket) : path.join(runDir, `${sessionId}.sock`);
-const bridgeScript = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../bridge/bridge.py");
+const bridgeDir = path.dirname(createRequire(import.meta.url).resolve("looper-bridge/package.json"));
+const bridgeScript = path.join(bridgeDir, "bridge.py");
 const traceDir = expandTilde(config.traceDir || "~/.looper/traces");
 const traceFile = path.join(traceDir, `${sessionId}.ndjson`);
 const logFile = path.join(runDir, `${sessionId}.log`);
@@ -102,7 +104,7 @@ const wakeBus = new WakeBus();
 
 // ExtensionContext is shared SDK surface. Attach the workflow helpers at runtime
 // so an extension can use them without a second copy of the type or a core edit.
-const coreHelpers = await import("@looper/core");
+const coreHelpers = await import("looper-core");
 
 const flows = new FlowStore();
 const stateDir = stateRoot(cwd);

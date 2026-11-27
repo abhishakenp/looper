@@ -12,7 +12,7 @@
  * live in the cached prefix — looper must never rewrite them (channel response-only
  * for status, request+response for new task facts after the boundary).
  */
-import type { Decision } from "@looper/sdk";
+import type { Decision } from "looper-sdk";
 import { detectCacheBoundary, verifyCacheSafe, type CacheBoundary } from "./detect.js";
 import { safeAppendContext } from "./inject.js";
 

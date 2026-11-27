@@ -1,5 +1,5 @@
 import { defineDoc, defineDocFamily, defineTask, MemoryStorage } from "@earendil-works/pi-durable";
-import type { FlowId, FlowMeta } from "@looper/sdk";
+import type { FlowId, FlowMeta } from "looper-sdk";
 import fs from "node:fs";
 import path from "node:path";
 import { stateRoot, atomicWriteJson } from "./state.js";

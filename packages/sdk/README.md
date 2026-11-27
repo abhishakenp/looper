@@ -1,13 +1,13 @@
-# @looper/sdk
+# looper-sdk
 
-Shared TypeScript contracts used by Looper extensions, `@looper/core`, and `@looper/cli`. Runtime-agnostic: types plus `defineExtension` and `DEFAULT_LOOPER_CONFIG`.
+Shared TypeScript contracts used by Looper extensions, `looper-core`, and `looper-cli`. Runtime-agnostic: types plus `defineExtension` and `DEFAULT_LOOPER_CONFIG`.
 
 ## Install
 
 ```bash
-bun add @looper/sdk
+bun add looper-sdk
 # or
-npm install @looper/sdk
+npm install looper-sdk
 ```
 
 ## Exports
@@ -22,7 +22,7 @@ npm install @looper/sdk
 ## Example extension
 
 ```ts
-import { defineExtension, type HookFn } from "@looper/sdk";
+import { defineExtension, type HookFn } from "looper-sdk";
 
 export default defineExtension((ctx) => {
   const onRequest: HookFn = (msg, api) => {

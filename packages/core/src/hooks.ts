@@ -1,4 +1,4 @@
-import type { BridgeInbound, Decision, HookApi, FlowId, HookFn, HookType } from "@looper/sdk";
+import type { BridgeInbound, Decision, HookApi, FlowId, HookFn, HookType } from "looper-sdk";
 import { FlowStore } from "./flow.js";
 import { DurableState } from "./state.js";
 import { stripInjectedResponseBlocks } from "./workflows/channels.js";

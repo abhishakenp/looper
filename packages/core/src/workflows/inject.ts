@@ -6,7 +6,7 @@
  * to those bytes costs 10x. These helpers append at a deterministic position,
  * dedupe identical injections, and verify the prefix hash before returning.
  */
-import type { Decision, ProxyRequest } from "@looper/sdk";
+import type { Decision, ProxyRequest } from "looper-sdk";
 import { detectCacheBoundary, verifyCacheSafe, type CacheBoundary } from "./detect.js";
 
 export interface InjectOptions {

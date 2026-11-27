@@ -17,7 +17,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_LOOPER_CONFIG, type LooperConfig } from "@looper/sdk";
+import { DEFAULT_LOOPER_CONFIG, type LooperConfig } from "looper-sdk";
 
 export type ConfigLayer = { name: string; value: Record<string, unknown> };
 
@@ -143,6 +143,9 @@ function envOverrides(env: Record<string, string | undefined>): Record<string, u
     ["LOOPER_CA_TIMEOUT_MS", (v) => { out.caTimeoutMs = Number(v); }],
     ["LOOPER_PROXY_PORT", (v) => { out.proxyPort = Number(v); }],
     ["LOOPER_CAPTURE_BODIES", (v) => { out.captureBodies = v === "1" || v === "true"; }],
+    ["LOOPER_INTERCEPT_MODE", (v) => { out.interceptMode = oneOf(v, ["local", "regular"] as const, "local"); }],
+    ["LOOPER_CAPTURE_SCOPE", (v) => { out.captureScope = oneOf(v, ["pid", "name"] as const, "pid"); }],
+    ["LOOPER_PROXY_PORT", (v) => { out.proxyPort = Number(v); }],
     ["LOOPER_TRUST_PROJECT_CONFIG", (v) => { out.security = { trustProjectConfig: v === "1" || v === "true" }; }],
     ["LOOPER_FANOUT_CONCURRENCY", (v) => { out.fanout = { concurrency: Number(v) }; }],
     ["LOOPER_ROUTER_TIMEOUT_MS", (v) => { out.router = { timeoutMs: Number(v) }; }],

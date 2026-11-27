@@ -1,6 +1,6 @@
 {
-  "name": "@looper/cli",
-  "version": "0.0.1",
+  "name": "looper-cli",
+  "version": "0.0.2",
   "description": "Looper CLI: transparent process-scope proxy harness for CLI agents",
   "type": "module",
   "bin": { "looper": "dist/index.js" },
@@ -8,8 +8,8 @@
   "repository": { "type": "git", "url": "git+https://github.com/abhishakenp/looper.git" },
   "scripts": { "build": "tsc -p tsconfig.json" },
   "dependencies": {
-    "@looper/bridge": "0.0.1",
-    "@looper/core": "0.0.1",
-    "@looper/sdk": "0.0.1"
+    "looper-bridge": "0.0.1",
+    "looper-core": "0.0.2",
+    "looper-sdk": "0.0.1"
   }
 }
